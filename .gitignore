@@ -1,0 +1,16 @@
+# Virtual environments
+venv/
+.venv/
+
+# PyCharm
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Data / models
+dataset/
+trained_models/
+*.pth
+*.pt
