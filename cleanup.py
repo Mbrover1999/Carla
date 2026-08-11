@@ -23,22 +23,28 @@ def destroy_existing_vehicles(world):
             )
 
 
-def cleanup(camera, vehicles):
+def cleanup(sensor_list, vehicles):
     sensors.stop_sensors()
 
-    if camera is not None:
+    for sensor in sensor_list:
+        if sensor is None:
+            continue
+
         try:
-            camera.stop()
+            sensor.stop()
             time.sleep(0.2)
 
-            if camera.is_alive:
-                camera.destroy()
+            if sensor.is_alive:
+                sensor.destroy()
 
-            print("Camera destroyed")
+            print(
+                "Sensor destroyed:",
+                sensor.type_id
+            )
 
         except RuntimeError as error:
             print(
-                f"Could not destroy camera: {error}"
+                f"Could not destroy sensor: {error}"
             )
 
     for vehicle in vehicles:

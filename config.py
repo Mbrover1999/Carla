@@ -1,25 +1,54 @@
 from pathlib import Path
 
+
+# =========================
+# Project
+# =========================
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+# =========================
+# CARLA connection
+# =========================
+
 HOST = "localhost"
 PORT = 2000
 CLIENT_TIMEOUT = 5.0
+MAP_NAME = "Town10HD"
+
+
+# =========================
+# Simulation
+# =========================
 
 RUN_DURATION_SECONDS = 1200
 NUMBER_OF_TRAFFIC_VEHICLES = 20
 
+
+# =========================
+# Ego vehicle
+# =========================
+
 EGO_VEHICLE_BLUEPRINT = "vehicle.tesla.model3"
+
+
+# =========================
+# RGB camera
+# =========================
 
 CAMERA_WIDTH = 800
 CAMERA_HEIGHT = 600
 CAMERA_FOV = 90
 CAMERA_SENSOR_TICK = 0.05
-MAP_NAME = "Town10HD"
+
 CAMERA_LOCATION_X = 1.5
 CAMERA_LOCATION_Z = 1.7
 CAMERA_PITCH = 0.0
 
+
 # =========================
-# Dataset configuration
+# Dataset collection
 # =========================
 
 DATASET_DIRECTORY = "dataset"
@@ -43,10 +72,8 @@ COLLECTING_DATA = False
 
 
 # =========================
-# AI model
+# Steering model
 # =========================
-
-PROJECT_ROOT = Path(__file__).resolve().parent
 
 STEERING_MODEL_PATH = (
     PROJECT_ROOT
@@ -59,7 +86,7 @@ MODEL_IMAGE_WIDTH = 320
 
 
 # =========================
-# AI controller limits
+# AI controller
 # =========================
 
 STEERING_GAIN = 0.60
@@ -79,15 +106,21 @@ MAX_THROTTLE = 0.35
 MIN_BRAKE = 0.0
 MAX_BRAKE = 1.0
 
-# =========================
-# Safety Layer
-# =========================
 
-SAFETY_ENABLED = True
+# =========================
+# Obstacle sensor
+# =========================
 
 OBSTACLE_SENSOR_DISTANCE = 20.0
 OBSTACLE_SENSOR_HIT_RADIUS = 1.0
 OBSTACLE_SENSOR_TICK = 0.05
+
+
+# =========================
+# Safety layer
+# =========================
+
+SAFETY_ENABLED = True
 
 SAFETY_SLOW_DISTANCE = 12.0
 SAFETY_BRAKE_DISTANCE = 6.0
@@ -96,4 +129,3 @@ SAFETY_EMERGENCY_DISTANCE = 3.0
 SAFETY_SLOW_THROTTLE = 0.08
 SAFETY_BRAKE_AMOUNT = 0.45
 SAFETY_EMERGENCY_BRAKE = 1.0
-

@@ -31,7 +31,7 @@ class AutopilotController:
 
         control = vehicle.get_control()
 
-        return {
+        information = {
             "raw_steering": control.steer,
             "limited_steering": control.steer,
             "applied_steering": control.steer,
@@ -39,6 +39,8 @@ class AutopilotController:
             "brake": control.brake,
             "speed_kmh": None
         }
+
+        return control, information
 
     def deactivate(self, vehicle):
         vehicle.set_autopilot(False)

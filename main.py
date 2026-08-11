@@ -15,7 +15,10 @@ from controllers.autopilot_controller import (
     AutopilotController
 )
 from data_collector import DataCollector
-from sensors import create_rgb_camera
+from sensors import (
+    create_rgb_camera,
+    create_obstacle_sensor
+)
 from simulation import run_simulation
 from vehicles import (
     spawn_ego_vehicle,
@@ -39,6 +42,7 @@ def create_controller(client):
 
 def main():
     camera = None
+    obstacle_sensor = None
     created_vehicles = []
     data_collector = None
 
@@ -60,6 +64,11 @@ def main():
         )
 
         camera = create_rgb_camera(
+            world,
+            ego_vehicle
+        )
+
+        obstacle_sensor = create_obstacle_sensor(
             world,
             ego_vehicle
         )

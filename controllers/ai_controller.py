@@ -46,8 +46,13 @@ class AIController:
 
     def update(self, vehicle, frame):
         if frame is None:
-            self._apply_safe_stop(vehicle)
-            return None
+            safe_stop_control = carla.VehicleControl(
+                throttle=0.0,
+                steer=0.0,
+                brake=1.0
+            )
+
+            return safe_stop_control, None
 
         raw_prediction = (
             self.predictor.predict_from_numpy(frame)
@@ -100,20 +105,22 @@ class AIController:
             manual_gear_shift=False
         )
 
-        vehicle.apply_control(control)
+        # vehicle.apply_control(control)
 
         self.last_raw_prediction = raw_prediction
         self.last_limited_prediction = control.steer
 
-        return {
-             "raw_steering": raw_prediction,
-             "scaled_steering": scaled_prediction,
-             "limited_steering": limited_prediction,
-             "applied_steering": control.steer,
-             "throttle": control.throttle,
-             "brake": control.brake,
-             "speed_kmh": speed_kmh
+        information = {
+            "raw_steering": raw_prediction,
+            "scaled_steering": scaled_prediction,
+            "limited_steering": limited_prediction,
+            "applied_steering": control.steer,
+            "throttle": control.throttle,
+            "brake": control.brake,
+            "speed_kmh": speed_kmh
         }
+
+        return control, information
 
     def deactivate(self, vehicle):
         vehicle.apply_control(

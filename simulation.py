@@ -4,7 +4,11 @@ import carla
 import cv2
 
 import sensors
-from config import RUN_DURATION_SECONDS
+from config import (
+    RUN_DURATION_SECONDS,
+    SAFETY_ENABLED
+)
+from safety.safety_layer import SafetyLayer
 
 
 def update_spectator(world, ego_vehicle):
@@ -32,7 +36,12 @@ def update_spectator(world, ego_vehicle):
     )
 
 
-def draw_controller_information(frame, information):
+def draw_controller_information(
+    frame,
+    information,
+    safety_state="DISABLED",
+    obstacle_distance=None
+):
     display_frame = frame.copy()
 
     if information is None:
@@ -64,12 +73,21 @@ def draw_controller_information(frame, information):
             f"Speed: {speed_kmh:.1f} km/h"
         )
 
+    lines.append(
+        f"Safety: {safety_state}"
+    )
+
+    if obstacle_distance is not None:
+        lines.append(
+            f"Obstacle: {obstacle_distance:.1f} m"
+        )
+
     overlay = display_frame.copy()
 
     cv2.rectangle(
         overlay,
         (10, 10),
-        (400, 170),
+        (400, 225),
         (0, 0, 0),
         thickness=-1
     )
@@ -109,10 +127,13 @@ def run_simulation(
     data_collector=None
 ):
     controller.activate(ego_vehicle)
+    safety_layer = SafetyLayer()
 
     end_time = time.time() + RUN_DURATION_SECONDS
     last_processed_frame_number = None
     controller_information = None
+    safety_state = "DISABLED"
+    obstacle_distance = None
 
     try:
         while time.time() < end_time:
@@ -135,12 +156,47 @@ def run_simulation(
             )
 
             if is_new_frame:
-                controller_information = (
-                    controller.update(
-                        vehicle=ego_vehicle,
-                        frame=frame
-                    )
+                (
+                    requested_control,
+                    controller_information
+                ) = controller.update(
+                    vehicle=ego_vehicle,
+                    frame=frame
                 )
+
+                (
+                    obstacle_distance,
+                    _
+                ) = sensors.get_latest_obstacle()
+
+                if SAFETY_ENABLED:
+                    (
+                        final_control,
+                        safety_state
+                    ) = safety_layer.apply(
+                        requested_control=requested_control,
+                        obstacle_distance=obstacle_distance
+                    )
+                else:
+                    final_control = requested_control
+                    safety_state = "DISABLED"
+
+                ego_vehicle.apply_control(
+                    final_control
+                )
+
+                if controller_information is not None:
+                    controller_information[
+                        "applied_steering"
+                    ] = final_control.steer
+
+                    controller_information[
+                        "throttle"
+                    ] = final_control.throttle
+
+                    controller_information[
+                        "brake"
+                    ] = final_control.brake
 
                 if data_collector is not None:
                     data_collector.save_sample(
@@ -157,7 +213,9 @@ def run_simulation(
                 display_frame = (
                     draw_controller_information(
                         frame,
-                        controller_information
+                        controller_information,
+                        safety_state,
+                        obstacle_distance
                     )
                 )
 
