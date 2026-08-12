@@ -164,6 +164,14 @@ def run_simulation(
                     frame=frame
                 )
 
+                speed_kmh = 0.0
+
+                if controller_information is not None:
+                    speed_kmh = (
+                        controller_information.get("speed_kmh")
+                        or 0.0
+                    )
+
                 (
                     obstacle_distance,
                     _
@@ -175,7 +183,8 @@ def run_simulation(
                         safety_state
                     ) = safety_layer.apply(
                         requested_control=requested_control,
-                        obstacle_distance=obstacle_distance
+                        obstacle_distance=obstacle_distance,
+                        speed_kmh=speed_kmh
                     )
                 else:
                     final_control = requested_control
