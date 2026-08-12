@@ -17,7 +17,8 @@ from controllers.autopilot_controller import (
 from data_collector import DataCollector
 from sensors import (
     create_rgb_camera,
-    create_obstacle_sensor
+    create_obstacle_sensor,
+    create_collision_sensor
 )
 from simulation import run_simulation
 from vehicles import (
@@ -43,6 +44,8 @@ def create_controller(client):
 def main():
     camera = None
     obstacle_sensor = None
+    collision_sensor = None
+    sensor_list = []
     created_vehicles = []
     data_collector = None
 
@@ -67,11 +70,19 @@ def main():
             world,
             ego_vehicle
         )
+        sensor_list.append(camera)
 
         obstacle_sensor = create_obstacle_sensor(
             world,
             ego_vehicle
         )
+        sensor_list.append(obstacle_sensor)
+
+        collision_sensor = create_collision_sensor(
+            world,
+            ego_vehicle
+        )
+        sensor_list.append(collision_sensor)
 
         controller = create_controller(client)
 
@@ -98,7 +109,7 @@ def main():
             data_collector.close()
 
         cleanup(
-            camera,
+            sensor_list,
             created_vehicles
         )
 

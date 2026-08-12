@@ -9,6 +9,7 @@ from config import (
     SAFETY_ENABLED
 )
 from safety.safety_layer import SafetyLayer
+from safety.safety_logger import SafetyLogger
 
 
 def update_spectator(world, ego_vehicle):
@@ -40,7 +41,8 @@ def draw_controller_information(
     frame,
     information,
     safety_state="DISABLED",
-    obstacle_distance=None
+    obstacle_distance=None,
+    collision_detected=False
 ):
     display_frame = frame.copy()
 
@@ -82,12 +84,16 @@ def draw_controller_information(
             f"Obstacle: {obstacle_distance:.1f} m"
         )
 
+    lines.append(
+        f"Collision: {'YES' if collision_detected else 'NO'}"
+    )
+
     overlay = display_frame.copy()
 
     cv2.rectangle(
         overlay,
         (10, 10),
-        (400, 225),
+        (400, 255),
         (0, 0, 0),
         thickness=-1
     )
@@ -128,12 +134,16 @@ def run_simulation(
 ):
     controller.activate(ego_vehicle)
     safety_layer = SafetyLayer()
+    safety_logger = SafetyLogger()
+    safety_logger.start()
 
     end_time = time.time() + RUN_DURATION_SECONDS
     last_processed_frame_number = None
     controller_information = None
     safety_state = "DISABLED"
     obstacle_distance = None
+    collision_detected = False
+    collision_actor = None
 
     try:
         while time.time() < end_time:
@@ -177,6 +187,12 @@ def run_simulation(
                     _
                 ) = sensors.get_latest_obstacle()
 
+                (
+                    collision_detected,
+                    collision_actor,
+                    _
+                ) = sensors.get_latest_collision()
+
                 if SAFETY_ENABLED:
                     (
                         final_control,
@@ -192,6 +208,15 @@ def run_simulation(
 
                 ego_vehicle.apply_control(
                     final_control
+                )
+
+                safety_logger.log_event(
+                    speed_kmh=speed_kmh,
+                    obstacle_distance=obstacle_distance,
+                    safety_state=safety_state,
+                    control=final_control,
+                    collision=collision_detected,
+                    collision_actor=collision_actor
                 )
 
                 if controller_information is not None:
@@ -224,7 +249,8 @@ def run_simulation(
                         frame,
                         controller_information,
                         safety_state,
-                        obstacle_distance
+                        obstacle_distance,
+                        collision_detected
                     )
                 )
 
@@ -242,4 +268,5 @@ def run_simulation(
                 break
 
     finally:
+        safety_logger.close()
         controller.deactivate(ego_vehicle)

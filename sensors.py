@@ -40,6 +40,17 @@ obstacle_lock = threading.Lock()
 
 
 # =========================
+# Collision sensor state
+# =========================
+
+collision_detected = False
+latest_collision_actor = None
+latest_collision_time = None
+
+collision_lock = threading.Lock()
+
+
+# =========================
 # Sensor state
 # =========================
 
@@ -100,6 +111,24 @@ def process_obstacle(event):
 
 
 # =========================
+# Collision callback
+# =========================
+
+def process_collision(event):
+    global collision_detected
+    global latest_collision_actor
+    global latest_collision_time
+
+    if not running:
+        return
+
+    with collision_lock:
+        collision_detected = True
+        latest_collision_actor = event.other_actor
+        latest_collision_time = time.time()
+
+
+# =========================
 # RGB getter
 # =========================
 
@@ -136,6 +165,19 @@ def get_latest_obstacle():
         return (
             latest_obstacle_distance,
             latest_obstacle_actor
+        )
+
+
+# =========================
+# Collision getter
+# =========================
+
+def get_latest_collision():
+    with collision_lock:
+        return (
+            collision_detected,
+            latest_collision_actor,
+            latest_collision_time
         )
 
 
@@ -264,6 +306,46 @@ def create_obstacle_sensor(
     print("Obstacle sensor created")
 
     return obstacle_sensor
+
+
+# =========================
+# Collision sensor creation
+# =========================
+
+def create_collision_sensor(
+    world,
+    ego_vehicle
+):
+    blueprints = (
+        world.get_blueprint_library()
+    )
+
+    collision_blueprint = blueprints.find(
+        "sensor.other.collision"
+    )
+
+    collision_transform = carla.Transform(
+        carla.Location(
+            x=0.0,
+            y=0.0,
+            z=0.0
+        )
+    )
+
+    collision_sensor = world.spawn_actor(
+        collision_blueprint,
+        collision_transform,
+        attach_to=ego_vehicle,
+        attachment_type=carla.AttachmentType.Rigid
+    )
+
+    collision_sensor.listen(
+        process_collision
+    )
+
+    print("Collision sensor created")
+
+    return collision_sensor
 
 
 # =========================
