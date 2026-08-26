@@ -9,12 +9,22 @@ import sensors
 from config import (
     CONTROLLER_INACTIVITY_ENABLED,
     CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE,
+    INTERSECTION_CONTROLLER_ENABLED,
     LANE_INVASION_ENABLED,
     LANE_KEEPING_ENABLED,
+    NAVIGATION_ENABLED,
+    ROAD_SPEED_CONTROL_ENABLED,
     RUN_DURATION_SECONDS,
     SAFETY_ENABLED,
     TRAFFIC_LIGHT_DETECTION_ENABLED
 )
+from navigation.intersection_controller import (
+    IntersectionController
+)
+from navigation.road_speed_controller import (
+    RoadSpeedController
+)
+from navigation.route_manager import RouteManager
 from safety.inactivity_detector import (
     ControllerInactivityDetector
 )
@@ -64,6 +74,9 @@ def draw_controller_information(
     lane_keeping_enabled=False,
     lane_keeping_information=None,
     traffic_light_information=None,
+    navigation_information=None,
+    intersection_information=None,
+    road_speed_information=None,
     obstacle_distance=None,
     collision_detected=False
 ):
@@ -96,6 +109,46 @@ def draw_controller_information(
             lines.append(
                 f"Speed: {speed_kmh:.1f} km/h"
             )
+
+    if road_speed_information is not None:
+        lines.append(
+            "Road limit / target: "
+            f"{road_speed_information['speed_limit_kmh']:.0f} / "
+            f"{road_speed_information['target_speed_kmh']:.0f} km/h"
+        )
+
+    if navigation_information is not None:
+        maneuver = navigation_information["maneuver"]
+        maneuver_distance = navigation_information.get(
+            "maneuver_distance_m"
+        )
+        maneuver_text = maneuver
+
+        if maneuver_distance is not None:
+            maneuver_text += f" in {maneuver_distance:.0f} m"
+
+        lines.append(
+            f"Navigation: {navigation_information['mode']} | "
+            f"{maneuver_text}"
+        )
+
+        lines.append(
+            "Destination: "
+            f"{navigation_information['destination_distance_m']:.0f} m "
+            f"(route {navigation_information['route_number']}) "
+            "[N: new]"
+        )
+
+    if (
+        intersection_information is not None
+        and intersection_information["active"]
+    ):
+        lines.append(
+            "Route steering: "
+            f"{intersection_information['applied_steering']:+.3f} "
+            f"(error "
+            f"{intersection_information['heading_error_deg']:+.1f} deg)"
+        )
 
     lines.append(
         f"Obstacle safety: {obstacle_safety_state}"
@@ -473,6 +526,16 @@ def run_simulation(
         world.get_map()
     )
     traffic_light_safety = TrafficLightSafety()
+    route_manager = (
+        RouteManager(
+            world_map=world.get_map(),
+            vehicle=ego_vehicle
+        )
+        if NAVIGATION_ENABLED
+        else None
+    )
+    intersection_controller = IntersectionController()
+    road_speed_controller = RoadSpeedController()
     alert_manager = SafetyAlertManager()
     safety_logger = SafetyLogger()
     safety_logger.start()
@@ -503,6 +566,11 @@ def run_simulation(
         )
     )
     traffic_light_information = TrafficLightSafety.information()
+    navigation_information = None
+    intersection_information = (
+        IntersectionController.information()
+    )
+    road_speed_information = None
     safety_event_key = None
 
     try:
@@ -577,6 +645,63 @@ def run_simulation(
                 speed_kmh = calculate_speed_kmh(
                     ego_vehicle
                 )
+
+                navigation_mode = RouteManager.AI
+
+                if route_manager is not None:
+                    navigation_information = (
+                        route_manager.update()
+                    )
+                    navigation_mode = navigation_information[
+                        "mode"
+                    ]
+
+                intersection_active = (
+                    controller_responded
+                    and INTERSECTION_CONTROLLER_ENABLED
+                    and navigation_information is not None
+                    and navigation_mode in (
+                        RouteManager.APPROACH,
+                        RouteManager.INTERSECTION
+                    )
+                )
+
+                if intersection_active:
+                    (
+                        requested_control,
+                        intersection_information
+                    ) = intersection_controller.apply(
+                        vehicle=ego_vehicle,
+                        requested_control=requested_control,
+                        target_waypoint=(
+                            navigation_information[
+                                "target_waypoint"
+                            ]
+                        )
+                    )
+                else:
+                    intersection_information = (
+                        IntersectionController.information()
+                    )
+
+                    if controller_responded:
+                        intersection_controller.reset(
+                            steering=requested_control.steer
+                        )
+
+                if (
+                    controller_responded
+                    and ROAD_SPEED_CONTROL_ENABLED
+                ):
+                    (
+                        requested_control,
+                        road_speed_information
+                    ) = road_speed_controller.apply(
+                        vehicle=ego_vehicle,
+                        requested_control=requested_control,
+                        current_speed_kmh=speed_kmh,
+                        navigation_mode=navigation_mode
+                    )
 
                 (
                     obstacle_distance,
@@ -654,7 +779,9 @@ def run_simulation(
 
                 lane_keeping_allowed = (
                     SAFETY_ENABLED
+                    and controller_responded
                     and lane_keeping_enabled
+                    and navigation_mode == RouteManager.AI
                     and inactivity_state
                     != ControllerInactivityDetector.SAFE_STOP
                     and obstacle_safety_state not in (
@@ -820,6 +947,15 @@ def run_simulation(
                         traffic_light_information=(
                             traffic_light_information
                         ),
+                        navigation_information=(
+                            navigation_information
+                        ),
+                        intersection_information=(
+                            intersection_information
+                        ),
+                        road_speed_information=(
+                            road_speed_information
+                        ),
                         obstacle_distance=obstacle_distance,
                         collision_detected=collision_detected
                     )
@@ -872,6 +1008,16 @@ def run_simulation(
                     if lane_keeping_enabled
                     else "disabled"
                 )
+
+            if (
+                route_manager is not None
+                and pressed_key in (
+                    ord("n"),
+                    ord("N")
+                )
+            ):
+                route_manager.plan_new_route()
+                intersection_controller.reset()
 
     finally:
         alert_manager.close()
