@@ -136,3 +136,26 @@ SAFETY_EMERGENCY_TIME_GAP = 0.4
 SAFETY_SLOW_THROTTLE = 0.08
 SAFETY_BRAKE_AMOUNT = 0.45
 SAFETY_EMERGENCY_BRAKE = 1.0
+
+
+# =========================
+# Controller inactivity
+# =========================
+
+CONTROLLER_INACTIVITY_ENABLED = True
+
+# Ignore inactivity while the vehicle is stopped or moving very slowly.
+CONTROLLER_INACTIVITY_MIN_SPEED_KMH = 3.0
+
+# Time without a fresh controller response before warning / safe stop.
+CONTROLLER_INACTIVITY_WARNING_SECONDS = 2.0
+CONTROLLER_INACTIVITY_SAFE_STOP_SECONDS = 5.0
+
+CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE = 1.0
+
+
+# =========================
+# Safety alerts
+# =========================
+
+SAFETY_SOUND_ENABLED = True
