@@ -23,6 +23,7 @@ class SafetyLogger:
         self.csv_writer = None
         self.start_time = None
         self.last_safety_state = "CLEAR"
+        self.last_event_key = None
         self.collision_logged = False
 
     def start(self):
@@ -74,7 +75,8 @@ class SafetyLogger:
         safety_state,
         control,
         collision=False,
-        collision_actor=None
+        collision_actor=None,
+        event_key=None
     ):
         if self.csv_writer is None:
             raise RuntimeError(
@@ -90,10 +92,15 @@ class SafetyLogger:
             and not self.collision_logged
         )
 
+        new_safety_event = (
+            event_key is not None
+            and event_key != self.last_event_key
+        )
+
         should_log = (
             safety_state != "CLEAR"
             and safety_changed
-        ) or new_collision
+        ) or new_collision or new_safety_event
 
         if not should_log:
             self.last_safety_state = safety_state
@@ -130,6 +137,9 @@ class SafetyLogger:
 
         if new_collision:
             self.collision_logged = True
+
+        if event_key is not None:
+            self.last_event_key = event_key
 
         print(
             "Safety event:",

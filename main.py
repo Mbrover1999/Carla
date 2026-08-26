@@ -18,7 +18,8 @@ from data_collector import DataCollector
 from sensors import (
     create_rgb_camera,
     create_obstacle_sensor,
-    create_collision_sensor
+    create_collision_sensor,
+    create_lane_invasion_sensor
 )
 from simulation import run_simulation
 from vehicles import (
@@ -45,6 +46,7 @@ def main():
     camera = None
     obstacle_sensor = None
     collision_sensor = None
+    lane_invasion_sensor = None
     sensor_list = []
     created_vehicles = []
     data_collector = None
@@ -83,6 +85,14 @@ def main():
             ego_vehicle
         )
         sensor_list.append(collision_sensor)
+
+        lane_invasion_sensor = (
+            create_lane_invasion_sensor(
+                world,
+                ego_vehicle
+            )
+        )
+        sensor_list.append(lane_invasion_sensor)
 
         controller = create_controller(client)
 

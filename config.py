@@ -159,3 +159,11 @@ CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE = 1.0
 # =========================
 
 SAFETY_SOUND_ENABLED = True
+
+
+# =========================
+# Lane departure warning
+# =========================
+
+LANE_INVASION_ENABLED = True
+LANE_INVASION_ALERT_DURATION_SECONDS = 2.0

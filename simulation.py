@@ -9,6 +9,7 @@ import sensors
 from config import (
     CONTROLLER_INACTIVITY_ENABLED,
     CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE,
+    LANE_INVASION_ENABLED,
     RUN_DURATION_SECONDS,
     SAFETY_ENABLED
 )
@@ -54,6 +55,8 @@ def draw_controller_information(
     inactivity_test_active=False,
     intervention_reason=None,
     intervention_urgent=False,
+    lane_invasion_detected=False,
+    lane_markings=None,
     obstacle_distance=None,
     collision_detected=False
 ):
@@ -118,6 +121,20 @@ def draw_controller_information(
 
     lines.append(
         f"Collision: {'YES' if collision_detected else 'NO'}"
+    )
+
+    lane_text = "NO"
+
+    if lane_invasion_detected:
+        marking_text = ", ".join(lane_markings or [])
+        lane_text = (
+            f"YES ({marking_text})"
+            if marking_text
+            else "YES"
+        )
+
+    lines.append(
+        f"Lane departure: {lane_text}"
     )
 
     overlay = display_frame.copy()
@@ -216,7 +233,8 @@ def calculate_speed_kmh(vehicle):
 
 def combine_safety_states(
     obstacle_safety_state,
-    inactivity_state
+    inactivity_state,
+    lane_invasion_state="CLEAR"
 ):
     active_states = []
 
@@ -232,6 +250,9 @@ def combine_safety_states(
     ):
         active_states.append(inactivity_state)
 
+    if lane_invasion_state != "CLEAR":
+        active_states.append(lane_invasion_state)
+
     if active_states:
         return " + ".join(active_states)
 
@@ -246,7 +267,9 @@ def combine_safety_states(
 
 def get_intervention_reason(
     obstacle_safety_state,
-    inactivity_state
+    inactivity_state,
+    lane_invasion_detected=False,
+    lane_markings=None
 ):
     reasons = []
     urgent = False
@@ -288,6 +311,15 @@ def get_intervention_reason(
     ):
         urgent = True
 
+    if lane_invasion_detected:
+        marking_text = ", ".join(lane_markings or [])
+        lane_reason = "Lane departure detected"
+
+        if marking_text:
+            lane_reason += f" ({marking_text})"
+
+        reasons.append(lane_reason)
+
     if not reasons:
         return None, False
 
@@ -321,6 +353,9 @@ def run_simulation(
     obstacle_distance = None
     collision_detected = False
     collision_actor = None
+    lane_invasion_detected = False
+    lane_markings = []
+    lane_event_key = None
 
     try:
         while time.time() < end_time:
@@ -406,6 +441,17 @@ def run_simulation(
                     _
                 ) = sensors.get_latest_collision()
 
+                if LANE_INVASION_ENABLED:
+                    (
+                        lane_invasion_detected,
+                        lane_markings,
+                        lane_event_key
+                    ) = sensors.get_latest_lane_invasion()
+                else:
+                    lane_invasion_detected = False
+                    lane_markings = []
+                    lane_event_key = None
+
                 if SAFETY_ENABLED:
                     (
                         final_control,
@@ -452,12 +498,15 @@ def run_simulation(
                     intervention_urgent
                 ) = get_intervention_reason(
                     obstacle_safety_state,
-                    inactivity_state
+                    inactivity_state,
+                    lane_invasion_detected,
+                    lane_markings
                 )
 
                 alert_manager.update(
                     reason=intervention_reason,
-                    urgent=intervention_urgent
+                    urgent=intervention_urgent,
+                    event_key=lane_event_key
                 )
 
                 ego_vehicle.apply_control(
@@ -469,11 +518,17 @@ def run_simulation(
                     obstacle_distance=obstacle_distance,
                     safety_state=combine_safety_states(
                         obstacle_safety_state,
-                        inactivity_state
+                        inactivity_state,
+                        (
+                            "LANE_INVASION"
+                            if lane_invasion_detected
+                            else "CLEAR"
+                        )
                     ),
                     control=final_control,
                     collision=collision_detected,
-                    collision_actor=collision_actor
+                    collision_actor=collision_actor,
+                    event_key=lane_event_key
                 )
 
                 if controller_information is not None:
@@ -506,16 +561,24 @@ def run_simulation(
             if frame is not None:
                 display_frame = (
                     draw_controller_information(
-                        frame,
-                        controller_information,
-                        obstacle_safety_state,
-                        inactivity_state,
-                        inactivity_seconds,
-                        inactivity_test_active,
-                        intervention_reason,
-                        intervention_urgent,
-                        obstacle_distance,
-                        collision_detected
+                        frame=frame,
+                        information=controller_information,
+                        obstacle_safety_state=(
+                            obstacle_safety_state
+                        ),
+                        inactivity_state=inactivity_state,
+                        inactivity_seconds=inactivity_seconds,
+                        inactivity_test_active=(
+                            inactivity_test_active
+                        ),
+                        intervention_reason=intervention_reason,
+                        intervention_urgent=intervention_urgent,
+                        lane_invasion_detected=(
+                            lane_invasion_detected
+                        ),
+                        lane_markings=lane_markings,
+                        obstacle_distance=obstacle_distance,
+                        collision_detected=collision_detected
                     )
                 )
 

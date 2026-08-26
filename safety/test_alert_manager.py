@@ -49,6 +49,28 @@ class SafetyAlertManagerTests(unittest.TestCase):
         self.assertTrue(is_new_alert)
         play_sound.assert_not_called()
 
+    def test_new_event_key_repeats_same_alert(self):
+        manager = SafetyAlertManager(sound_enabled=True)
+
+        with patch.object(
+            manager,
+            "_play_sound"
+        ) as play_sound:
+            manager.update(
+                "Lane departure",
+                event_key=100
+            )
+            manager.update(
+                "Lane departure",
+                event_key=100
+            )
+            manager.update(
+                "Lane departure",
+                event_key=101
+            )
+
+        self.assertEqual(play_sound.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

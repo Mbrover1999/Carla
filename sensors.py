@@ -15,7 +15,9 @@ from config import (
 
     OBSTACLE_SENSOR_DISTANCE,
     OBSTACLE_SENSOR_HIT_RADIUS,
-    OBSTACLE_SENSOR_TICK
+    OBSTACLE_SENSOR_TICK,
+
+    LANE_INVASION_ALERT_DURATION_SECONDS
 )
 
 
@@ -48,6 +50,17 @@ latest_collision_actor = None
 latest_collision_time = None
 
 collision_lock = threading.Lock()
+
+
+# =========================
+# Lane invasion sensor state
+# =========================
+
+latest_lane_markings = []
+latest_lane_invasion_time = None
+latest_lane_invasion_frame = None
+
+lane_invasion_lock = threading.Lock()
 
 
 # =========================
@@ -129,6 +142,48 @@ def process_collision(event):
 
 
 # =========================
+# Lane invasion callback
+# =========================
+
+def process_lane_invasion(event):
+    global latest_lane_markings
+    global latest_lane_invasion_time
+    global latest_lane_invasion_frame
+
+    if not running:
+        return
+
+    marking_names = []
+
+    for marking in event.crossed_lane_markings:
+        marking_type = getattr(
+            marking,
+            "type",
+            "Unknown"
+        )
+
+        marking_name = getattr(
+            marking_type,
+            "name",
+            None
+        )
+
+        if marking_name is None:
+            marking_name = str(marking_type).split(".")[-1]
+
+        marking_names.append(marking_name)
+
+    with lane_invasion_lock:
+        latest_lane_markings = sorted(set(marking_names))
+        latest_lane_invasion_time = time.time()
+        latest_lane_invasion_frame = getattr(
+            event,
+            "frame",
+            None
+        )
+
+
+# =========================
 # RGB getter
 # =========================
 
@@ -178,6 +233,38 @@ def get_latest_collision():
             collision_detected,
             latest_collision_actor,
             latest_collision_time
+        )
+
+
+# =========================
+# Lane invasion getter
+# =========================
+
+def get_latest_lane_invasion():
+    with lane_invasion_lock:
+        if latest_lane_invasion_time is None:
+            return False, [], None
+
+        time_since_invasion = (
+            time.time()
+            - latest_lane_invasion_time
+        )
+
+        if time_since_invasion > (
+            LANE_INVASION_ALERT_DURATION_SECONDS
+        ):
+            return False, [], None
+
+        event_key = (
+            latest_lane_invasion_frame
+            if latest_lane_invasion_frame is not None
+            else latest_lane_invasion_time
+        )
+
+        return (
+            True,
+            list(latest_lane_markings),
+            event_key
         )
 
 
@@ -346,6 +433,38 @@ def create_collision_sensor(
     print("Collision sensor created")
 
     return collision_sensor
+
+
+# =========================
+# Lane invasion sensor creation
+# =========================
+
+def create_lane_invasion_sensor(
+    world,
+    ego_vehicle
+):
+    blueprints = (
+        world.get_blueprint_library()
+    )
+
+    lane_invasion_blueprint = blueprints.find(
+        "sensor.other.lane_invasion"
+    )
+
+    lane_invasion_sensor = world.spawn_actor(
+        lane_invasion_blueprint,
+        carla.Transform(),
+        attach_to=ego_vehicle,
+        attachment_type=carla.AttachmentType.Rigid
+    )
+
+    lane_invasion_sensor.listen(
+        process_lane_invasion
+    )
+
+    print("Lane invasion sensor created")
+
+    return lane_invasion_sensor
 
 
 # =========================

@@ -9,15 +9,28 @@ class SafetyAlertManager:
     def __init__(self, sound_enabled=SAFETY_SOUND_ENABLED):
         self.sound_enabled = sound_enabled
         self.last_reason = None
+        self.last_alert_identity = None
         self.sound_process = None
 
-    def update(self, reason, urgent=False):
+    def update(
+        self,
+        reason,
+        urgent=False,
+        event_key=None
+    ):
+        alert_identity = (
+            None
+            if reason is None
+            else (reason, event_key)
+        )
+
         is_new_alert = (
             reason is not None
-            and reason != self.last_reason
+            and alert_identity != self.last_alert_identity
         )
 
         self.last_reason = reason
+        self.last_alert_identity = alert_identity
 
         if is_new_alert and self.sound_enabled:
             self._play_sound(urgent=urgent)
