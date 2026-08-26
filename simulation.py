@@ -12,7 +12,8 @@ from config import (
     LANE_INVASION_ENABLED,
     LANE_KEEPING_ENABLED,
     RUN_DURATION_SECONDS,
-    SAFETY_ENABLED
+    SAFETY_ENABLED,
+    TRAFFIC_LIGHT_DETECTION_ENABLED
 )
 from safety.inactivity_detector import (
     ControllerInactivityDetector
@@ -21,6 +22,7 @@ from safety.alert_manager import SafetyAlertManager
 from safety.lane_keeping import LaneKeepingAssist
 from safety.safety_layer import SafetyLayer
 from safety.safety_logger import SafetyLogger
+from safety.traffic_light_safety import TrafficLightSafety
 
 
 def update_spectator(world, ego_vehicle):
@@ -61,6 +63,7 @@ def draw_controller_information(
     lane_markings=None,
     lane_keeping_enabled=False,
     lane_keeping_information=None,
+    traffic_light_information=None,
     obstacle_distance=None,
     collision_detected=False
 ):
@@ -139,6 +142,28 @@ def draw_controller_information(
 
     lines.append(
         f"Lane departure: {lane_text}"
+    )
+
+    if traffic_light_information is None:
+        traffic_light_state = TrafficLightSafety.NONE
+        traffic_light_distance = None
+    else:
+        traffic_light_state = traffic_light_information[
+            "light_state"
+        ]
+        traffic_light_distance = traffic_light_information.get(
+            "distance_m"
+        )
+
+    traffic_light_text = traffic_light_state
+
+    if traffic_light_distance is not None:
+        traffic_light_text += (
+            f" ({traffic_light_distance:.1f} m)"
+        )
+
+    lines.append(
+        f"Traffic light: {traffic_light_text}"
     )
 
     if lane_keeping_information is None:
@@ -286,7 +311,8 @@ def combine_safety_states(
     obstacle_safety_state,
     inactivity_state,
     lane_invasion_state="CLEAR",
-    lane_keeping_state="CLEAR"
+    lane_keeping_state="CLEAR",
+    traffic_light_state="CLEAR"
 ):
     active_states = []
 
@@ -308,6 +334,9 @@ def combine_safety_states(
     if lane_keeping_state != "CLEAR":
         active_states.append(lane_keeping_state)
 
+    if traffic_light_state != TrafficLightSafety.CLEAR:
+        active_states.append(traffic_light_state)
+
     if active_states:
         return " + ".join(active_states)
 
@@ -325,7 +354,8 @@ def get_intervention_reason(
     inactivity_state,
     lane_invasion_detected=False,
     lane_markings=None,
-    lane_keeping_state=None
+    lane_keeping_state=None,
+    traffic_light_state=None
 ):
     reasons = []
     urgent = False
@@ -392,10 +422,42 @@ def get_intervention_reason(
     if lane_keeping_reason is not None:
         reasons.append(lane_keeping_reason)
 
+    traffic_light_reasons = {
+        TrafficLightSafety.YELLOW_WARNING: (
+            "Yellow traffic light ahead"
+        ),
+        TrafficLightSafety.RED_BRAKING: (
+            "Red traffic light - stopping"
+        )
+    }
+
+    traffic_light_reason = traffic_light_reasons.get(
+        traffic_light_state
+    )
+
+    if traffic_light_reason is not None:
+        reasons.append(traffic_light_reason)
+
+    if traffic_light_state == TrafficLightSafety.RED_BRAKING:
+        urgent = True
+
     if not reasons:
         return None, False
 
     return " | ".join(reasons), urgent
+
+
+def combine_event_keys(*event_keys):
+    active_keys = tuple(
+        event_key
+        for event_key in event_keys
+        if event_key is not None
+    )
+
+    if not active_keys:
+        return None
+
+    return active_keys
 
 
 def run_simulation(
@@ -410,6 +472,7 @@ def run_simulation(
     lane_keeping_assist = LaneKeepingAssist(
         world.get_map()
     )
+    traffic_light_safety = TrafficLightSafety()
     alert_manager = SafetyAlertManager()
     safety_logger = SafetyLogger()
     safety_logger.start()
@@ -439,6 +502,8 @@ def run_simulation(
             else LaneKeepingAssist.DISABLED
         )
     )
+    traffic_light_information = TrafficLightSafety.information()
+    safety_event_key = None
 
     try:
         while time.time() < end_time:
@@ -550,6 +615,28 @@ def run_simulation(
 
                 if (
                     SAFETY_ENABLED
+                    and TRAFFIC_LIGHT_DETECTION_ENABLED
+                ):
+                    traffic_light_information = (
+                        traffic_light_safety.inspect(
+                            ego_vehicle
+                        )
+                    )
+
+                    final_control = traffic_light_safety.apply(
+                        requested_control=final_control,
+                        traffic_light_information=(
+                            traffic_light_information
+                        ),
+                        speed_kmh=speed_kmh
+                    )
+                else:
+                    traffic_light_information = (
+                        TrafficLightSafety.information()
+                    )
+
+                if (
+                    SAFETY_ENABLED
                     and CONTROLLER_INACTIVITY_ENABLED
                 ):
                     (
@@ -574,6 +661,9 @@ def run_simulation(
                         "BRAKING",
                         "EMERGENCY"
                     )
+                    and traffic_light_information[
+                        "safety_state"
+                    ] != TrafficLightSafety.RED_BRAKING
                 )
 
                 if lane_keeping_allowed:
@@ -620,13 +710,28 @@ def run_simulation(
                     inactivity_state,
                     lane_invasion_detected,
                     lane_markings,
-                    lane_keeping_information["state"]
+                    lane_keeping_information["state"],
+                    traffic_light_information["safety_state"]
+                )
+
+                traffic_light_event_key = None
+
+                if traffic_light_information[
+                    "safety_state"
+                ] != TrafficLightSafety.CLEAR:
+                    traffic_light_event_key = (
+                        traffic_light_information["event_key"]
+                    )
+
+                safety_event_key = combine_event_keys(
+                    lane_event_key,
+                    traffic_light_event_key
                 )
 
                 alert_manager.update(
                     reason=intervention_reason,
                     urgent=intervention_urgent,
-                    event_key=lane_event_key
+                    event_key=safety_event_key
                 )
 
                 ego_vehicle.apply_control(
@@ -651,12 +756,15 @@ def run_simulation(
                                 LaneKeepingAssist.CORRECTING_RIGHT
                             )
                             else "CLEAR"
-                        )
+                        ),
+                        traffic_light_information[
+                            "safety_state"
+                        ]
                     ),
                     control=final_control,
                     collision=collision_detected,
                     collision_actor=collision_actor,
-                    event_key=lane_event_key
+                    event_key=safety_event_key
                 )
 
                 if controller_information is not None:
@@ -708,6 +816,9 @@ def run_simulation(
                         lane_keeping_enabled=lane_keeping_enabled,
                         lane_keeping_information=(
                             lane_keeping_information
+                        ),
+                        traffic_light_information=(
+                            traffic_light_information
                         ),
                         obstacle_distance=obstacle_distance,
                         collision_detected=collision_detected
