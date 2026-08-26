@@ -167,3 +167,21 @@ SAFETY_SOUND_ENABLED = True
 
 LANE_INVASION_ENABLED = True
 LANE_INVASION_ALERT_DURATION_SECONDS = 2.0
+
+
+# =========================
+# Lane keeping assist
+# =========================
+
+LANE_KEEPING_ENABLED = True
+LANE_KEEPING_MIN_SPEED_KMH = 8.0
+
+# Start assisting when either limit is exceeded.
+LANE_KEEPING_OFFSET_THRESHOLD_METERS = 0.50
+LANE_KEEPING_HEADING_THRESHOLD_DEGREES = 7.0
+
+# Steering correction = -(offset * gain + heading error * gain).
+LANE_KEEPING_LATERAL_GAIN = 0.18
+LANE_KEEPING_HEADING_GAIN = 0.012
+LANE_KEEPING_MAX_CORRECTION = 0.18
+LANE_KEEPING_STEERING_LIMIT = 0.45

@@ -10,6 +10,7 @@ from config import (
     CONTROLLER_INACTIVITY_ENABLED,
     CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE,
     LANE_INVASION_ENABLED,
+    LANE_KEEPING_ENABLED,
     RUN_DURATION_SECONDS,
     SAFETY_ENABLED
 )
@@ -17,6 +18,7 @@ from safety.inactivity_detector import (
     ControllerInactivityDetector
 )
 from safety.alert_manager import SafetyAlertManager
+from safety.lane_keeping import LaneKeepingAssist
 from safety.safety_layer import SafetyLayer
 from safety.safety_logger import SafetyLogger
 
@@ -57,6 +59,8 @@ def draw_controller_information(
     intervention_urgent=False,
     lane_invasion_detected=False,
     lane_markings=None,
+    lane_keeping_enabled=False,
+    lane_keeping_information=None,
     obstacle_distance=None,
     collision_detected=False
 ):
@@ -137,12 +141,59 @@ def draw_controller_information(
         f"Lane departure: {lane_text}"
     )
 
+    if lane_keeping_information is None:
+        lane_keeping_state = LaneKeepingAssist.DISABLED
+    else:
+        lane_keeping_state = lane_keeping_information["state"]
+
+    correction_text = ""
+
+    if (
+        lane_keeping_information is not None
+        and lane_keeping_state in (
+            LaneKeepingAssist.CORRECTING_LEFT,
+            LaneKeepingAssist.CORRECTING_RIGHT
+        )
+    ):
+        correction_text = (
+            " "
+            f"({lane_keeping_information['steering_correction']:+.3f})"
+        )
+
+    lines.append(
+        f"Lane keeping: {lane_keeping_state}{correction_text} "
+        f"[L: {'ON' if lane_keeping_enabled else 'OFF'}]"
+    )
+
+    if lane_keeping_information is not None:
+        lateral_offset = lane_keeping_information.get(
+            "lateral_offset_m"
+        )
+        heading_error = lane_keeping_information.get(
+            "heading_error_deg"
+        )
+
+        if (
+            lateral_offset is not None
+            and heading_error is not None
+        ):
+            lines.append(
+                f"Lane offset: {lateral_offset:+.2f} m  "
+                f"Heading: {heading_error:+.1f} deg"
+            )
+
     overlay = display_frame.copy()
 
     cv2.rectangle(
         overlay,
         (10, 10),
-        (520, 320),
+        (
+            560,
+            min(
+                display_frame.shape[0] - 10,
+                20 + 28 * len(lines)
+            )
+        ),
         (0, 0, 0),
         thickness=-1
     )
@@ -234,7 +285,8 @@ def calculate_speed_kmh(vehicle):
 def combine_safety_states(
     obstacle_safety_state,
     inactivity_state,
-    lane_invasion_state="CLEAR"
+    lane_invasion_state="CLEAR",
+    lane_keeping_state="CLEAR"
 ):
     active_states = []
 
@@ -253,6 +305,9 @@ def combine_safety_states(
     if lane_invasion_state != "CLEAR":
         active_states.append(lane_invasion_state)
 
+    if lane_keeping_state != "CLEAR":
+        active_states.append(lane_keeping_state)
+
     if active_states:
         return " + ".join(active_states)
 
@@ -269,7 +324,8 @@ def get_intervention_reason(
     obstacle_safety_state,
     inactivity_state,
     lane_invasion_detected=False,
-    lane_markings=None
+    lane_markings=None,
+    lane_keeping_state=None
 ):
     reasons = []
     urgent = False
@@ -320,6 +376,22 @@ def get_intervention_reason(
 
         reasons.append(lane_reason)
 
+    lane_keeping_reasons = {
+        LaneKeepingAssist.CORRECTING_LEFT: (
+            "Lane keeping assist - steering left"
+        ),
+        LaneKeepingAssist.CORRECTING_RIGHT: (
+            "Lane keeping assist - steering right"
+        )
+    }
+
+    lane_keeping_reason = lane_keeping_reasons.get(
+        lane_keeping_state
+    )
+
+    if lane_keeping_reason is not None:
+        reasons.append(lane_keeping_reason)
+
     if not reasons:
         return None, False
 
@@ -335,6 +407,9 @@ def run_simulation(
     controller.activate(ego_vehicle)
     safety_layer = SafetyLayer()
     inactivity_detector = ControllerInactivityDetector()
+    lane_keeping_assist = LaneKeepingAssist(
+        world.get_map()
+    )
     alert_manager = SafetyAlertManager()
     safety_logger = SafetyLogger()
     safety_logger.start()
@@ -356,6 +431,14 @@ def run_simulation(
     lane_invasion_detected = False
     lane_markings = []
     lane_event_key = None
+    lane_keeping_enabled = LANE_KEEPING_ENABLED
+    lane_keeping_information = LaneKeepingAssist.status(
+        (
+            LaneKeepingAssist.LOW_SPEED
+            if lane_keeping_enabled
+            else LaneKeepingAssist.DISABLED
+        )
+    )
 
     try:
         while time.time() < end_time:
@@ -482,6 +565,42 @@ def run_simulation(
                     inactivity_state = "DISABLED"
                     inactivity_seconds = 0.0
 
+                lane_keeping_allowed = (
+                    SAFETY_ENABLED
+                    and lane_keeping_enabled
+                    and inactivity_state
+                    != ControllerInactivityDetector.SAFE_STOP
+                    and obstacle_safety_state not in (
+                        "BRAKING",
+                        "EMERGENCY"
+                    )
+                )
+
+                if lane_keeping_allowed:
+                    (
+                        final_control,
+                        lane_keeping_information
+                    ) = lane_keeping_assist.apply(
+                        vehicle=ego_vehicle,
+                        requested_control=final_control,
+                        speed_kmh=speed_kmh
+                    )
+                else:
+                    lane_keeping_state = (
+                        LaneKeepingAssist.DISABLED
+                        if (
+                            not SAFETY_ENABLED
+                            or not lane_keeping_enabled
+                        )
+                        else LaneKeepingAssist.SUPPRESSED
+                    )
+
+                    lane_keeping_information = (
+                        LaneKeepingAssist.status(
+                            lane_keeping_state
+                        )
+                    )
+
                 if inactivity_state == (
                     ControllerInactivityDetector.SAFE_STOP
                 ):
@@ -500,7 +619,8 @@ def run_simulation(
                     obstacle_safety_state,
                     inactivity_state,
                     lane_invasion_detected,
-                    lane_markings
+                    lane_markings,
+                    lane_keeping_information["state"]
                 )
 
                 alert_manager.update(
@@ -522,6 +642,14 @@ def run_simulation(
                         (
                             "LANE_INVASION"
                             if lane_invasion_detected
+                            else "CLEAR"
+                        ),
+                        (
+                            lane_keeping_information["state"]
+                            if lane_keeping_information["state"] in (
+                                LaneKeepingAssist.CORRECTING_LEFT,
+                                LaneKeepingAssist.CORRECTING_RIGHT
+                            )
                             else "CLEAR"
                         )
                     ),
@@ -577,6 +705,10 @@ def run_simulation(
                             lane_invasion_detected
                         ),
                         lane_markings=lane_markings,
+                        lane_keeping_enabled=lane_keeping_enabled,
+                        lane_keeping_information=(
+                            lane_keeping_information
+                        ),
                         obstacle_distance=obstacle_distance,
                         collision_detected=collision_detected
                     )
@@ -614,6 +746,21 @@ def run_simulation(
                         "Inactivity test disabled: controller "
                         "resumed."
                     )
+
+            if pressed_key in (
+                ord("l"),
+                ord("L")
+            ):
+                lane_keeping_enabled = (
+                    not lane_keeping_enabled
+                )
+
+                print(
+                    "Lane keeping assist:",
+                    "enabled"
+                    if lane_keeping_enabled
+                    else "disabled"
+                )
 
     finally:
         alert_manager.close()
