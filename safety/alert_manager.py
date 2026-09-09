@@ -56,6 +56,9 @@ class SafetyAlertManager:
         return is_new_alert
 
     def close(self):
+        self.stop_current_sound()
+
+    def stop_current_sound(self):
         if (
             self.sound_process is not None
             and self.sound_process.poll() is None
@@ -66,6 +69,14 @@ class SafetyAlertManager:
                 pass
 
         self.sound_process = None
+
+        if platform.system() == "Windows":
+            try:
+                import winsound
+
+                winsound.PlaySound(None, 0)
+            except (ImportError, RuntimeError):
+                pass
 
     def play_horn(self):
         if self.sound_enabled:

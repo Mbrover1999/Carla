@@ -990,10 +990,14 @@ def run_simulation(
                         inactive_seconds=inactivity_seconds
                     )
                 else:
+                    emergency_was_active = emergency_pull_over.active
                     emergency_pull_over.reset()
                     emergency_information = (
                         EmergencyPullOverController.information()
                     )
+
+                    if emergency_was_active:
+                        alert_manager.stop_current_sound()
 
                 requested_hazards = emergency_information[
                     "hazards_active"

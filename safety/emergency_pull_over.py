@@ -134,17 +134,6 @@ class EmergencyPullOverController:
                 )
                 self.phase = self._moving_phase(target_lane)
 
-        horn_requested = False
-
-        if self.phase not in (self.STOPPED, self.INACTIVE):
-            if (
-                self.last_horn_time is None
-                or current_time - self.last_horn_time
-                >= self.horn_interval_seconds
-            ):
-                horn_requested = True
-                self.last_horn_time = current_time
-
         call_requested = False
 
         if (
@@ -153,6 +142,20 @@ class EmergencyPullOverController:
         ):
             self.call_started = True
             call_requested = True
+
+        horn_requested = False
+
+        if call_requested:
+            # Give the dialing sound one uninterrupted cycle.
+            self.last_horn_time = current_time
+        elif self.phase != self.INACTIVE:
+            if (
+                self.last_horn_time is None
+                or current_time - self.last_horn_time
+                >= self.horn_interval_seconds
+            ):
+                horn_requested = True
+                self.last_horn_time = current_time
 
         return control, self.information(
             phase=self.phase,

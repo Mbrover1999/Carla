@@ -220,6 +220,40 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
         self.assertTrue(first["call_started"])
         self.assertFalse(second["call_requested"])
 
+    def test_wakeup_alarm_repeats_even_after_vehicle_stops(self):
+        current = FakeWaypoint(1, 0.0)
+        world_map = FakeMap(current)
+
+        _, first = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            world_map,
+            speed_kmh=0.0,
+            inactive_seconds=5.0,
+            now=10.0
+        )
+        _, too_soon = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            world_map,
+            speed_kmh=0.0,
+            inactive_seconds=6.0,
+            now=11.0
+        )
+        _, repeated = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            world_map,
+            speed_kmh=0.0,
+            inactive_seconds=8.1,
+            now=13.1
+        )
+
+        self.assertEqual(first["phase"], self.controller.STOPPED)
+        self.assertTrue(first["horn_requested"])
+        self.assertFalse(too_soon["horn_requested"])
+        self.assertTrue(repeated["horn_requested"])
+
 
 if __name__ == "__main__":
     unittest.main()

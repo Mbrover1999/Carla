@@ -79,6 +79,14 @@ class SafetyAlertManagerTests(unittest.TestCase):
         self.assertTrue(manager.horn_sound_path.is_file())
         self.assertTrue(manager.call_sound_path.is_file())
 
+    def test_horn_uses_configured_wakeup_sound(self):
+        manager = SafetyAlertManager(sound_enabled=True)
+
+        with patch.object(manager, "_play_path") as play_path:
+            manager.play_horn()
+
+        play_path.assert_called_once_with(manager.horn_sound_path)
+
 
 if __name__ == "__main__":
     unittest.main()
