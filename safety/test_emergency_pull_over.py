@@ -195,6 +195,35 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             self.controller.WAITING_FOR_RIGHT_LANE
         )
 
+    def test_brakes_immediately_after_entering_shoulder(self):
+        current = FakeWaypoint(1, 0.0)
+        shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
+        # Even if CARLA exposes another lane farther right, the shoulder
+        # must remain the final destination.
+        shoulder.right_lane = FakeWaypoint(
+            3,
+            5.0,
+            lane_type="Parking"
+        )
+        current.right_lane = shoulder
+        vehicle = FakeVehicle(location(y=2.0))
+
+        control, information = self.controller.apply(
+            vehicle,
+            FakeControl(throttle=0.3),
+            FakeMap(current),
+            speed_kmh=10.0,
+            inactive_seconds=5.0,
+            now=10.0
+        )
+
+        self.assertEqual(control.throttle, 0.0)
+        self.assertGreaterEqual(control.brake, 0.45)
+        self.assertEqual(
+            information["phase"],
+            self.controller.STOPPING
+        )
+
     def test_simulated_call_is_requested_once_after_two_minutes(self):
         current = FakeWaypoint(1, 0.0)
         world_map = FakeMap(current)

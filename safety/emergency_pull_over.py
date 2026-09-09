@@ -9,6 +9,7 @@ from config import (
     EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS,
     EMERGENCY_PULL_OVER_LOOKAHEAD_METERS,
     EMERGENCY_PULL_OVER_MAX_STEERING,
+    EMERGENCY_PULL_OVER_SHOULDER_ENTRY_METERS,
     EMERGENCY_PULL_OVER_STEERING_GAIN,
     EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH,
     EMERGENCY_PULL_OVER_TARGET_SPEED_KMH,
@@ -94,12 +95,28 @@ class EmergencyPullOverController:
                 vehicle.get_location(),
                 target_lane
             )
+            is_shoulder = lane_type in (
+                "SHOULDER",
+                "PARKING"
+            )
+            reached_distance = (
+                EMERGENCY_PULL_OVER_SHOULDER_ENTRY_METERS
+                if is_shoulder
+                else EMERGENCY_PULL_OVER_LANE_REACHED_METERS
+            )
 
             if (
                 lateral_distance
-                <= EMERGENCY_PULL_OVER_LANE_REACHED_METERS
+                <= reached_distance
             ):
-                next_right_lane = self._valid_right_lane(target_lane)
+                # A shoulder or parking lane is the final destination.
+                # Brake as soon as the vehicle enters it; do not continue
+                # searching for another lane farther to the right.
+                next_right_lane = (
+                    None
+                    if is_shoulder
+                    else self._valid_right_lane(target_lane)
+                )
 
                 if next_right_lane is None:
                     self.target_lane_key = None
