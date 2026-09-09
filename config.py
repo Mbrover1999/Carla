@@ -22,7 +22,7 @@ MAP_NAME = "Town10HD"
 # Simulation
 # =========================
 
-RUN_DURATION_SECONDS = 1200
+RUN_DURATION_SECONDS = 3600
 NUMBER_OF_TRAFFIC_VEHICLES = 20
 
 
