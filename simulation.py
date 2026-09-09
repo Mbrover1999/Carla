@@ -8,7 +8,6 @@ import sensors
 
 from config import (
     CONTROLLER_INACTIVITY_ENABLED,
-    CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE,
     CROSS_TRAFFIC_DETECTION_ENABLED,
     INTERSECTION_CONTROLLER_ENABLED,
     LANE_INVASION_ENABLED,
@@ -31,6 +30,7 @@ from safety.inactivity_detector import (
 )
 from safety.alert_manager import SafetyAlertManager
 from safety.cross_traffic_safety import CrossTrafficSafety
+from safety.emergency_pull_over import EmergencyPullOverController
 from safety.lane_keeping import LaneKeepingAssist
 from safety.safety_layer import SafetyLayer
 from safety.safety_logger import SafetyLogger
@@ -62,6 +62,26 @@ def update_spectator(world, ego_vehicle):
     )
 
 
+def set_hazard_lights(vehicle, enabled):
+    try:
+        current_state = int(vehicle.get_light_state())
+        hazard_flags = int(
+            carla.VehicleLightState.LeftBlinker
+            | carla.VehicleLightState.RightBlinker
+        )
+        updated_state = (
+            current_state | hazard_flags
+            if enabled
+            else current_state & ~hazard_flags
+        )
+        vehicle.set_light_state(
+            carla.VehicleLightState(updated_state)
+        )
+        return True
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return False
+
+
 def draw_controller_information(
     frame,
     information,
@@ -69,6 +89,7 @@ def draw_controller_information(
     inactivity_state="DISABLED",
     inactivity_seconds=0.0,
     inactivity_test_active=False,
+    emergency_information=None,
     intervention_reason=None,
     intervention_urgent=False,
     lane_invasion_detected=False,
@@ -170,6 +191,29 @@ def draw_controller_information(
     lines.append(
         f"Controller: {inactivity_text}"
     )
+
+    if (
+        emergency_information is not None
+        and emergency_information["phase"]
+        != EmergencyPullOverController.INACTIVE
+    ):
+        lines.append(
+            "Emergency response: "
+            f"{emergency_information['phase']}"
+        )
+
+        if emergency_information["call_started"]:
+            lines.append("Emergency call: SIMULATED 911 CALL")
+        else:
+            call_countdown = emergency_information.get(
+                "call_countdown_seconds"
+            )
+
+            if call_countdown is not None:
+                lines.append(
+                    "Simulated 911 call in: "
+                    f"{call_countdown:.0f} s"
+                )
 
     lines.append(
         "Inactivity test: "
@@ -473,7 +517,7 @@ def get_intervention_reason(
             "Controller inactivity warning"
         ),
         ControllerInactivityDetector.SAFE_STOP: (
-            "Controller inactive - SAFE STOP"
+            "Controller inactive - emergency pull-over"
         )
     }
 
@@ -587,6 +631,7 @@ def run_simulation(
     )
     traffic_light_safety = TrafficLightSafety()
     cross_traffic_safety = CrossTrafficSafety()
+    emergency_pull_over = EmergencyPullOverController()
     route_manager = (
         RouteManager(
             world_map=world.get_map(),
@@ -609,6 +654,10 @@ def run_simulation(
     inactivity_state = "DISABLED"
     inactivity_seconds = 0.0
     inactivity_test_active = False
+    emergency_information = (
+        EmergencyPullOverController.information()
+    )
+    hazards_active = False
     intervention_reason = None
     intervention_urgent = False
     controller_error_active = False
@@ -929,13 +978,33 @@ def run_simulation(
                 if inactivity_state == (
                     ControllerInactivityDetector.SAFE_STOP
                 ):
-                    final_control = carla.VehicleControl(
-                        steer=0.0,
-                        throttle=0.0,
-                        brake=(
-                            CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE
-                        )
+                    (
+                        final_control,
+                        emergency_information
+                    ) = emergency_pull_over.apply(
+                        vehicle=ego_vehicle,
+                        requested_control=final_control,
+                        world_map=world.get_map(),
+                        world=world,
+                        speed_kmh=speed_kmh,
+                        inactive_seconds=inactivity_seconds
                     )
+                else:
+                    emergency_pull_over.reset()
+                    emergency_information = (
+                        EmergencyPullOverController.information()
+                    )
+
+                requested_hazards = emergency_information[
+                    "hazards_active"
+                ]
+
+                if requested_hazards != hazards_active:
+                    if set_hazard_lights(
+                        ego_vehicle,
+                        requested_hazards
+                    ):
+                        hazards_active = requested_hazards
 
                 (
                     intervention_reason,
@@ -970,6 +1039,11 @@ def run_simulation(
                     urgent=intervention_urgent,
                     event_key=safety_event_key
                 )
+
+                if emergency_information["call_requested"]:
+                    alert_manager.play_call_start()
+                elif emergency_information["horn_requested"]:
+                    alert_manager.play_horn()
 
                 ego_vehicle.apply_control(
                     final_control
@@ -1046,6 +1120,9 @@ def run_simulation(
                         inactivity_seconds=inactivity_seconds,
                         inactivity_test_active=(
                             inactivity_test_active
+                        ),
+                        emergency_information=(
+                            emergency_information
                         ),
                         intervention_reason=intervention_reason,
                         intervention_urgent=intervention_urgent,
@@ -1136,6 +1213,9 @@ def run_simulation(
                 intersection_controller.reset()
 
     finally:
+        if hazards_active:
+            set_hazard_lights(ego_vehicle, False)
+
         alert_manager.close()
         safety_logger.close()
         controller.deactivate(ego_vehicle)

@@ -7,3 +7,10 @@ set" and are distributed under CC0 1.0.
 - `adas_urgent.wav`: Minimal UI Alert Tone 11
 - Source: https://sfxmint.com/sets/ui-crisp
 - License: https://creativecommons.org/publicdomain/zero/1.0/
+
+`emergency_horn.wav` is the CC0 "Car signal" by Yaroslav Novikov:
+https://opengameart.org/content/car-signal
+
+`simulated_call.wav` is generated locally by
+`generate_simulated_call.py`. It plays the DTMF sequence 9-1-1 followed
+by a short ringback fragment; it never connects to a telephone service.

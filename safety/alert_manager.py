@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 
 from config import (
+    EMERGENCY_CALL_SOUND_PATH,
+    EMERGENCY_HORN_SOUND_PATH,
     SAFETY_SOUND_ENABLED,
     SAFETY_URGENT_SOUND_PATH,
     SAFETY_WARNING_SOUND_PATH
@@ -15,11 +17,15 @@ class SafetyAlertManager:
         self,
         sound_enabled=SAFETY_SOUND_ENABLED,
         warning_sound_path=SAFETY_WARNING_SOUND_PATH,
-        urgent_sound_path=SAFETY_URGENT_SOUND_PATH
+        urgent_sound_path=SAFETY_URGENT_SOUND_PATH,
+        horn_sound_path=EMERGENCY_HORN_SOUND_PATH,
+        call_sound_path=EMERGENCY_CALL_SOUND_PATH
     ):
         self.sound_enabled = sound_enabled
         self.warning_sound_path = Path(warning_sound_path)
         self.urgent_sound_path = Path(urgent_sound_path)
+        self.horn_sound_path = Path(horn_sound_path)
+        self.call_sound_path = Path(call_sound_path)
         self.last_reason = None
         self.last_alert_identity = None
         self.sound_process = None
@@ -61,16 +67,43 @@ class SafetyAlertManager:
 
         self.sound_process = None
 
+    def play_horn(self):
+        if self.sound_enabled:
+            self._play_path(self.horn_sound_path)
+
+    def play_call_start(self):
+        if self.sound_enabled:
+            self._play_path(self.call_sound_path)
+
     def _play_sound(self, urgent):
         system_name = platform.system()
         sound_path = self._sound_path(urgent)
 
+        self._play_path(
+            sound_path,
+            fallback_urgent=urgent,
+            system_name=system_name
+        )
+
+    def _play_path(
+        self,
+        sound_path,
+        fallback_urgent=False,
+        system_name=None
+    ):
+        system_name = system_name or platform.system()
+        if sound_path is not None:
+            sound_path = Path(sound_path)
+
+            if not sound_path.is_file():
+                sound_path = None
+
         if system_name == "Darwin":
-            self._play_macos_sound(sound_path, urgent)
+            self._play_macos_sound(sound_path, fallback_urgent)
             return
 
         if system_name == "Windows":
-            self._play_windows_sound(sound_path, urgent)
+            self._play_windows_sound(sound_path, fallback_urgent)
             return
 
         if sound_path is not None:

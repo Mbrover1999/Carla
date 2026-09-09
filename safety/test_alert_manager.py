@@ -76,6 +76,8 @@ class SafetyAlertManagerTests(unittest.TestCase):
 
         self.assertIsNotNone(manager._sound_path(urgent=False))
         self.assertIsNotNone(manager._sound_path(urgent=True))
+        self.assertTrue(manager.horn_sound_path.is_file())
+        self.assertTrue(manager.call_sound_path.is_file())
 
 
 if __name__ == "__main__":

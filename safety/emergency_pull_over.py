@@ -1,0 +1,437 @@
+import math
+import time
+
+from config import (
+    EMERGENCY_CALL_DELAY_SECONDS,
+    EMERGENCY_HORN_INTERVAL_SECONDS,
+    EMERGENCY_PULL_OVER_BRAKE,
+    EMERGENCY_PULL_OVER_LANE_REACHED_METERS,
+    EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS,
+    EMERGENCY_PULL_OVER_LOOKAHEAD_METERS,
+    EMERGENCY_PULL_OVER_MAX_STEERING,
+    EMERGENCY_PULL_OVER_STEERING_GAIN,
+    EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH,
+    EMERGENCY_PULL_OVER_TARGET_SPEED_KMH,
+    EMERGENCY_PULL_OVER_THROTTLE
+)
+
+
+class EmergencyPullOverController:
+    INACTIVE = "INACTIVE"
+    MOVING_RIGHT = "MOVING_TO_RIGHT_LANE"
+    MOVING_TO_SHOULDER = "MOVING_TO_SHOULDER"
+    WAITING_FOR_RIGHT_LANE = "WAITING_FOR_RIGHT_LANE"
+    STOPPING = "STOPPING_ON_RIGHT"
+    STOPPED = "STOPPED_WITH_HAZARDS"
+
+    ALLOWED_RIGHT_LANES = {
+        "DRIVING",
+        "SHOULDER",
+        "PARKING"
+    }
+
+    def __init__(
+        self,
+        horn_interval_seconds=EMERGENCY_HORN_INTERVAL_SECONDS,
+        call_delay_seconds=EMERGENCY_CALL_DELAY_SECONDS
+    ):
+        self.horn_interval_seconds = horn_interval_seconds
+        self.call_delay_seconds = call_delay_seconds
+        self.active = False
+        self.phase = self.INACTIVE
+        self.target_lane_key = None
+        self.last_horn_time = None
+        self.call_started = False
+
+    def apply(
+        self,
+        vehicle,
+        requested_control,
+        world_map,
+        speed_kmh,
+        inactive_seconds,
+        now=None,
+        world=None
+    ):
+        current_time = time.monotonic() if now is None else float(now)
+
+        if not self.active:
+            self.active = True
+            self.last_horn_time = None
+            self.call_started = False
+
+        current_waypoint = world_map.get_waypoint(
+            vehicle.get_location(),
+            project_to_road=True
+        )
+        target_lane = self._target_lane(current_waypoint)
+
+        if target_lane is None:
+            control = self._stopping_control(
+                requested_control,
+                speed_kmh
+            )
+            self.phase = (
+                self.STOPPED
+                if speed_kmh
+                <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
+                else self.STOPPING
+            )
+        elif not self._target_lane_is_clear(
+            world,
+            world_map,
+            vehicle,
+            target_lane
+        ):
+            control = self._stopping_control(
+                requested_control,
+                speed_kmh
+            )
+            self.phase = self.WAITING_FOR_RIGHT_LANE
+        else:
+            lane_type = self._lane_type_name(target_lane)
+            lateral_distance = self._lateral_distance(
+                vehicle.get_location(),
+                target_lane
+            )
+
+            if (
+                lateral_distance
+                <= EMERGENCY_PULL_OVER_LANE_REACHED_METERS
+            ):
+                next_right_lane = self._valid_right_lane(target_lane)
+
+                if next_right_lane is None:
+                    self.target_lane_key = None
+                    control = self._stopping_control(
+                        requested_control,
+                        speed_kmh
+                    )
+                    self.phase = (
+                        self.STOPPED
+                        if speed_kmh
+                        <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
+                        else self.STOPPING
+                    )
+                else:
+                    self.target_lane_key = self._lane_key(
+                        next_right_lane
+                    )
+                    target_lane = next_right_lane
+                    control = self._lane_change_control(
+                        vehicle,
+                        requested_control,
+                        target_lane,
+                        speed_kmh
+                    )
+                    self.phase = self._moving_phase(target_lane)
+            else:
+                control = self._lane_change_control(
+                    vehicle,
+                    requested_control,
+                    target_lane,
+                    speed_kmh
+                )
+                self.phase = self._moving_phase(target_lane)
+
+        horn_requested = False
+
+        if self.phase not in (self.STOPPED, self.INACTIVE):
+            if (
+                self.last_horn_time is None
+                or current_time - self.last_horn_time
+                >= self.horn_interval_seconds
+            ):
+                horn_requested = True
+                self.last_horn_time = current_time
+
+        call_requested = False
+
+        if (
+            inactive_seconds >= self.call_delay_seconds
+            and not self.call_started
+        ):
+            self.call_started = True
+            call_requested = True
+
+        return control, self.information(
+            phase=self.phase,
+            hazards_active=True,
+            horn_requested=horn_requested,
+            call_started=self.call_started,
+            call_requested=call_requested,
+            call_countdown_seconds=max(
+                0.0,
+                self.call_delay_seconds - inactive_seconds
+            )
+        )
+
+    def reset(self):
+        self.active = False
+        self.phase = self.INACTIVE
+        self.target_lane_key = None
+        self.last_horn_time = None
+        self.call_started = False
+
+    def _target_lane(self, current_waypoint):
+        if current_waypoint is None:
+            return None
+
+        if self.target_lane_key is not None:
+            candidate = current_waypoint
+
+            for _ in range(6):
+                if self._lane_key(candidate) == self.target_lane_key:
+                    return candidate
+
+                candidate = self._valid_right_lane(candidate)
+
+                if candidate is None:
+                    break
+
+        right_lane = self._valid_right_lane(current_waypoint)
+
+        if right_lane is None:
+            return None
+
+        self.target_lane_key = self._lane_key(right_lane)
+        return right_lane
+
+    def _lane_change_control(
+        self,
+        vehicle,
+        requested_control,
+        target_lane,
+        speed_kmh
+    ):
+        steering_waypoint = target_lane
+
+        try:
+            future_waypoints = target_lane.next(
+                EMERGENCY_PULL_OVER_LOOKAHEAD_METERS
+            )
+
+            if future_waypoints:
+                steering_waypoint = future_waypoints[0]
+        except (AttributeError, RuntimeError):
+            pass
+
+        vehicle_transform = vehicle.get_transform()
+        vehicle_location = vehicle_transform.location
+        target_location = steering_waypoint.transform.location
+        target_yaw = math.degrees(
+            math.atan2(
+                target_location.y - vehicle_location.y,
+                target_location.x - vehicle_location.x
+            )
+        )
+        heading_error = self._normalize_angle(
+            target_yaw - vehicle_transform.rotation.yaw
+        )
+        steer = self._clip(
+            heading_error * EMERGENCY_PULL_OVER_STEERING_GAIN,
+            -EMERGENCY_PULL_OVER_MAX_STEERING,
+            EMERGENCY_PULL_OVER_MAX_STEERING
+        )
+
+        if requested_control.brake > 0.0:
+            throttle = 0.0
+            brake = requested_control.brake
+        elif speed_kmh > EMERGENCY_PULL_OVER_TARGET_SPEED_KMH + 1.0:
+            throttle = 0.0
+            brake = EMERGENCY_PULL_OVER_BRAKE
+        elif speed_kmh < EMERGENCY_PULL_OVER_TARGET_SPEED_KMH - 1.0:
+            throttle = EMERGENCY_PULL_OVER_THROTTLE
+            brake = 0.0
+        else:
+            throttle = min(requested_control.throttle, 0.05)
+            brake = 0.0
+
+        return self._copy_control(
+            requested_control,
+            steer=steer,
+            throttle=throttle,
+            brake=brake
+        )
+
+    @staticmethod
+    def _stopping_control(requested_control, speed_kmh):
+        brake = (
+            1.0
+            if speed_kmh <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
+            else max(requested_control.brake, EMERGENCY_PULL_OVER_BRAKE)
+        )
+
+        return EmergencyPullOverController._copy_control(
+            requested_control,
+            steer=0.0,
+            throttle=0.0,
+            brake=brake
+        )
+
+    @classmethod
+    def _valid_right_lane(cls, waypoint):
+        try:
+            candidate = waypoint.get_right_lane()
+        except (AttributeError, RuntimeError):
+            return None
+
+        if candidate is None:
+            return None
+
+        lane_type = cls._lane_type_name(candidate)
+
+        if lane_type not in cls.ALLOWED_RIGHT_LANES:
+            return None
+
+        current_lane_id = getattr(waypoint, "lane_id", 0)
+        candidate_lane_id = getattr(candidate, "lane_id", 0)
+
+        if (
+            lane_type == "DRIVING"
+            and current_lane_id * candidate_lane_id < 0
+        ):
+            return None
+
+        return candidate
+
+    @classmethod
+    def _moving_phase(cls, target_lane):
+        return (
+            cls.MOVING_TO_SHOULDER
+            if cls._lane_type_name(target_lane) in (
+                "SHOULDER",
+                "PARKING"
+            )
+            else cls.MOVING_RIGHT
+        )
+
+    @staticmethod
+    def _lane_type_name(waypoint):
+        lane_type = getattr(waypoint, "lane_type", "UNKNOWN")
+        name = getattr(lane_type, "name", None)
+
+        if name is None:
+            name = str(lane_type).split(".")[-1]
+
+        return name.upper()
+
+    @staticmethod
+    def _target_lane_is_clear(
+        world,
+        world_map,
+        ego_vehicle,
+        target_lane
+    ):
+        if world is None:
+            return True
+
+        actors = world.get_actors()
+        actor_filter = getattr(actors, "filter", None)
+        vehicles = (
+            actors.filter("vehicle.*")
+            if callable(actor_filter)
+            else actors
+        )
+        ego_location = ego_vehicle.get_location()
+        target_road_id = getattr(target_lane, "road_id", None)
+        target_lane_id = getattr(target_lane, "lane_id", None)
+
+        for actor in vehicles:
+            if getattr(actor, "id", None) == getattr(
+                ego_vehicle,
+                "id",
+                None
+            ):
+                continue
+
+            try:
+                actor_location = actor.get_location()
+                actor_waypoint = world_map.get_waypoint(
+                    actor_location,
+                    project_to_road=True
+                )
+            except (AttributeError, RuntimeError):
+                continue
+
+            if actor_waypoint is None:
+                continue
+
+            if (
+                getattr(actor_waypoint, "road_id", None)
+                != target_road_id
+                or getattr(actor_waypoint, "lane_id", None)
+                != target_lane_id
+            ):
+                continue
+
+            distance = math.hypot(
+                actor_location.x - ego_location.x,
+                actor_location.y - ego_location.y
+            )
+
+            if distance <= EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS:
+                return False
+
+        return True
+
+    @classmethod
+    def _lane_key(cls, waypoint):
+        return (
+            getattr(waypoint, "lane_id", None),
+            cls._lane_type_name(waypoint)
+        )
+
+    @staticmethod
+    def _lateral_distance(vehicle_location, waypoint):
+        waypoint_transform = waypoint.transform
+        waypoint_location = waypoint_transform.location
+        yaw = math.radians(waypoint_transform.rotation.yaw)
+        dx = vehicle_location.x - waypoint_location.x
+        dy = vehicle_location.y - waypoint_location.y
+        return abs(-math.sin(yaw) * dx + math.cos(yaw) * dy)
+
+    @staticmethod
+    def _normalize_angle(angle_degrees):
+        return ((angle_degrees + 180.0) % 360.0) - 180.0
+
+    @staticmethod
+    def _clip(value, minimum, maximum):
+        return max(minimum, min(value, maximum))
+
+    @staticmethod
+    def _copy_control(control, steer, throttle, brake):
+        control_type = type(control)
+
+        return control_type(
+            throttle=throttle,
+            steer=steer,
+            brake=brake,
+            hand_brake=getattr(control, "hand_brake", False),
+            reverse=getattr(control, "reverse", False),
+            manual_gear_shift=getattr(
+                control,
+                "manual_gear_shift",
+                False
+            ),
+            gear=getattr(control, "gear", 0)
+        )
+
+    @classmethod
+    def information(
+        cls,
+        phase=INACTIVE,
+        hazards_active=False,
+        horn_requested=False,
+        call_started=False,
+        call_requested=False,
+        call_countdown_seconds=None
+    ):
+        return {
+            "phase": phase,
+            "hazards_active": hazards_active,
+            "horn_requested": horn_requested,
+            "call_started": call_started,
+            "call_requested": call_requested,
+            "call_countdown_seconds": call_countdown_seconds
+        }
