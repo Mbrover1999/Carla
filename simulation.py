@@ -9,6 +9,7 @@ import sensors
 from config import (
     CONTROLLER_INACTIVITY_ENABLED,
     CONTROLLER_INACTIVITY_SAFE_STOP_BRAKE,
+    CROSS_TRAFFIC_DETECTION_ENABLED,
     INTERSECTION_CONTROLLER_ENABLED,
     LANE_INVASION_ENABLED,
     LANE_KEEPING_ENABLED,
@@ -29,6 +30,7 @@ from safety.inactivity_detector import (
     ControllerInactivityDetector
 )
 from safety.alert_manager import SafetyAlertManager
+from safety.cross_traffic_safety import CrossTrafficSafety
 from safety.lane_keeping import LaneKeepingAssist
 from safety.safety_layer import SafetyLayer
 from safety.safety_logger import SafetyLogger
@@ -74,6 +76,7 @@ def draw_controller_information(
     lane_keeping_enabled=False,
     lane_keeping_information=None,
     traffic_light_information=None,
+    cross_traffic_information=None,
     navigation_information=None,
     intersection_information=None,
     road_speed_information=None,
@@ -218,6 +221,33 @@ def draw_controller_information(
     lines.append(
         f"Traffic light: {traffic_light_text}"
     )
+
+    if cross_traffic_information is None:
+        cross_traffic_state = CrossTrafficSafety.DISABLED
+        cross_traffic_distance = None
+        cross_traffic_gap = None
+    else:
+        cross_traffic_state = cross_traffic_information[
+            "safety_state"
+        ]
+        cross_traffic_distance = cross_traffic_information.get(
+            "distance_m"
+        )
+        cross_traffic_gap = cross_traffic_information.get(
+            "arrival_gap_s"
+        )
+
+    cross_traffic_text = cross_traffic_state
+
+    if cross_traffic_distance is not None:
+        cross_traffic_text += f" ({cross_traffic_distance:.1f} m"
+
+        if cross_traffic_gap is not None:
+            cross_traffic_text += f", gap {cross_traffic_gap:.1f} s"
+
+        cross_traffic_text += ")"
+
+    lines.append(f"Cross traffic: {cross_traffic_text}")
 
     if lane_keeping_information is None:
         lane_keeping_state = LaneKeepingAssist.DISABLED
@@ -365,7 +395,8 @@ def combine_safety_states(
     inactivity_state,
     lane_invasion_state="CLEAR",
     lane_keeping_state="CLEAR",
-    traffic_light_state="CLEAR"
+    traffic_light_state="CLEAR",
+    cross_traffic_state="CLEAR"
 ):
     active_states = []
 
@@ -390,6 +421,12 @@ def combine_safety_states(
     if traffic_light_state != TrafficLightSafety.CLEAR:
         active_states.append(traffic_light_state)
 
+    if cross_traffic_state not in (
+        CrossTrafficSafety.CLEAR,
+        CrossTrafficSafety.DISABLED
+    ):
+        active_states.append(cross_traffic_state)
+
     if active_states:
         return " + ".join(active_states)
 
@@ -408,12 +445,14 @@ def get_intervention_reason(
     lane_invasion_detected=False,
     lane_markings=None,
     lane_keeping_state=None,
-    traffic_light_state=None
+    traffic_light_state=None,
+    cross_traffic_state=None
 ):
     reasons = []
     urgent = False
 
     obstacle_reasons = {
+        "CREEPING": "Obstacle ahead - moving carefully",
         "SLOWING": "Obstacle ahead - slowing down",
         "BRAKING": "Obstacle ahead - braking",
         "EMERGENCY": "Obstacle ahead - EMERGENCY BRAKING"
@@ -494,6 +533,24 @@ def get_intervention_reason(
     if traffic_light_state == TrafficLightSafety.RED_BRAKING:
         urgent = True
 
+    cross_traffic_reasons = {
+        CrossTrafficSafety.WARNING: (
+            "Cross traffic approaching"
+        ),
+        CrossTrafficSafety.BRAKING: (
+            "Cross traffic conflict - stopping"
+        )
+    }
+    cross_traffic_reason = cross_traffic_reasons.get(
+        cross_traffic_state
+    )
+
+    if cross_traffic_reason is not None:
+        reasons.append(cross_traffic_reason)
+
+    if cross_traffic_state == CrossTrafficSafety.BRAKING:
+        urgent = True
+
     if not reasons:
         return None, False
 
@@ -526,6 +583,7 @@ def run_simulation(
         world.get_map()
     )
     traffic_light_safety = TrafficLightSafety()
+    cross_traffic_safety = CrossTrafficSafety()
     route_manager = (
         RouteManager(
             world_map=world.get_map(),
@@ -566,6 +624,9 @@ def run_simulation(
         )
     )
     traffic_light_information = TrafficLightSafety.information()
+    cross_traffic_information = CrossTrafficSafety.information(
+        safety_state=CrossTrafficSafety.DISABLED
+    )
     navigation_information = None
     intersection_information = (
         IntersectionController.information()
@@ -738,6 +799,37 @@ def run_simulation(
                     final_control = requested_control
                     obstacle_safety_state = "DISABLED"
 
+                cross_traffic_active = (
+                    SAFETY_ENABLED
+                    and CROSS_TRAFFIC_DETECTION_ENABLED
+                    and navigation_information is not None
+                    and navigation_mode in (
+                        RouteManager.APPROACH,
+                        RouteManager.INTERSECTION
+                    )
+                )
+
+                cross_traffic_information = (
+                    cross_traffic_safety.inspect(
+                        world=world,
+                        ego_vehicle=ego_vehicle,
+                        active=cross_traffic_active,
+                        target_waypoint=(
+                            navigation_information[
+                                "target_waypoint"
+                            ]
+                            if navigation_information is not None
+                            else None
+                        )
+                    )
+                )
+
+                final_control = cross_traffic_safety.apply(
+                    requested_control=final_control,
+                    information=cross_traffic_information,
+                    speed_kmh=speed_kmh
+                )
+
                 if (
                     SAFETY_ENABLED
                     and TRAFFIC_LIGHT_DETECTION_ENABLED
@@ -788,6 +880,9 @@ def run_simulation(
                         "BRAKING",
                         "EMERGENCY"
                     )
+                    and cross_traffic_information[
+                        "safety_state"
+                    ] != CrossTrafficSafety.BRAKING
                     and traffic_light_information[
                         "safety_state"
                     ] != TrafficLightSafety.RED_BRAKING
@@ -838,7 +933,8 @@ def run_simulation(
                     lane_invasion_detected,
                     lane_markings,
                     lane_keeping_information["state"],
-                    traffic_light_information["safety_state"]
+                    traffic_light_information["safety_state"],
+                    cross_traffic_information["safety_state"]
                 )
 
                 traffic_light_event_key = None
@@ -852,7 +948,8 @@ def run_simulation(
 
                 safety_event_key = combine_event_keys(
                     lane_event_key,
-                    traffic_light_event_key
+                    traffic_light_event_key,
+                    cross_traffic_information["event_key"]
                 )
 
                 alert_manager.update(
@@ -885,6 +982,9 @@ def run_simulation(
                             else "CLEAR"
                         ),
                         traffic_light_information[
+                            "safety_state"
+                        ],
+                        cross_traffic_information[
                             "safety_state"
                         ]
                     ),
@@ -946,6 +1046,9 @@ def run_simulation(
                         ),
                         traffic_light_information=(
                             traffic_light_information
+                        ),
+                        cross_traffic_information=(
+                            cross_traffic_information
                         ),
                         navigation_information=(
                             navigation_information

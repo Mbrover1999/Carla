@@ -84,8 +84,22 @@ class RouteManagerTests(unittest.TestCase):
 
         self.assertGreaterEqual(
             information["target_waypoint"].transform.location.x,
-            7.0
+            5.0
         )
+
+    def test_does_not_skip_to_spatially_close_future_segment(self):
+        self.manager.route = [
+            (waypoint(0.0), option("LANEFOLLOW")),
+            (waypoint(2.0), option("RIGHT")),
+            (waypoint(4.0), option("RIGHT")),
+            (waypoint(6.0), option("RIGHT")),
+            # A later segment passes close to the route start.
+            (waypoint(0.1), option("LANEFOLLOW"))
+        ]
+
+        self.manager._advance_route_index(location(0.0))
+
+        self.assertEqual(self.manager.route_index, 0)
 
 
 class GraphWaypoint:

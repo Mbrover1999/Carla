@@ -211,26 +211,31 @@ class RouteManager:
         return planner
 
     def _advance_route_index(self, vehicle_location):
-        search_end = min(
-            len(self.route),
-            self.route_index + 60
-        )
+        # Advance only through consecutive waypoints.  Searching dozens of
+        # future points by straight-line distance can select the exit side of
+        # a junction while entering it, causing the controller to cut across
+        # the inside lane line.
+        while self.route_index + 1 < len(self.route):
+            current_location = self.route[
+                self.route_index
+            ][0].transform.location
+            next_location = self.route[
+                self.route_index + 1
+            ][0].transform.location
 
-        best_index = self.route_index
-        best_distance = float("inf")
-
-        for index in range(self.route_index, search_end):
-            waypoint = self.route[index][0]
-            distance = self._distance(
+            current_distance = self._distance(
                 vehicle_location,
-                waypoint.transform.location
+                current_location
+            )
+            next_distance = self._distance(
+                vehicle_location,
+                next_location
             )
 
-            if distance < best_distance:
-                best_index = index
-                best_distance = distance
+            if next_distance > current_distance:
+                break
 
-        self.route_index = best_index
+            self.route_index += 1
 
     def _find_next_maneuver(self):
         distance = 0.0
