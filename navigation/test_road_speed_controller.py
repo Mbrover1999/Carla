@@ -35,7 +35,7 @@ class RoadSpeedControllerTests(unittest.TestCase):
     def setUp(self):
         self.controller = RoadSpeedController()
 
-    def test_uses_road_speed_limit_with_safety_margin(self):
+    def test_uses_full_road_speed_limit(self):
         _, information = self.controller.apply(
             FakeVehicle(50.0),
             FakeControl(),
@@ -44,7 +44,7 @@ class RoadSpeedControllerTests(unittest.TestCase):
         )
 
         self.assertEqual(information["speed_limit_kmh"], 50.0)
-        self.assertEqual(information["target_speed_kmh"], 45.0)
+        self.assertEqual(information["target_speed_kmh"], 50.0)
 
     def test_accelerates_below_target_speed(self):
         control, _ = self.controller.apply(
@@ -76,7 +76,17 @@ class RoadSpeedControllerTests(unittest.TestCase):
             navigation_mode="APPROACH"
         )
 
-        self.assertEqual(information["target_speed_kmh"], 16.0)
+        self.assertEqual(information["target_speed_kmh"], 30.0)
+
+    def test_junction_speed_scales_with_lower_road_limit(self):
+        _, information = self.controller.apply(
+            FakeVehicle(30.0),
+            FakeControl(),
+            current_speed_kmh=20.0,
+            navigation_mode="INTERSECTION"
+        )
+
+        self.assertEqual(information["target_speed_kmh"], 22.5)
 
     def test_keeps_last_valid_limit_after_spawn_gap(self):
         self.controller.apply(

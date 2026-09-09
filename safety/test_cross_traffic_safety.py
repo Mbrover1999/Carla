@@ -29,18 +29,25 @@ class FakeControl:
 
 
 class FakeActor:
-    def __init__(self, actor_id, x, y, vx, vy):
+    def __init__(self, actor_id, x, y, vx, vy, brake=0.0):
         self.id = actor_id
         self.type_id = "vehicle.test"
         self.is_alive = True
         self.location = vector(x, y)
         self.velocity = vector(vx, vy)
+        self.control = SimpleNamespace(brake=brake)
 
     def get_location(self):
         return self.location
 
     def get_velocity(self):
         return self.velocity
+
+    def get_control(self):
+        return self.control
+
+    def is_at_traffic_light(self):
+        return False
 
 
 class FakeEgo(FakeActor):
@@ -104,6 +111,41 @@ class CrossTrafficSafetyTests(unittest.TestCase):
         self.assertEqual(
             information["safety_state"],
             self.safety.CLEAR
+        )
+
+    def test_slow_waiting_vehicle_with_brake_is_ignored(self):
+        waiting = FakeActor(
+            2,
+            5.0,
+            -2.0,
+            0.0,
+            2.0,
+            brake=0.5
+        )
+
+        information = self.safety.inspect(
+            FakeWorld([self.ego, waiting]),
+            self.ego,
+            active=True
+        )
+
+        self.assertEqual(
+            information["safety_state"],
+            self.safety.CLEAR
+        )
+
+    def test_slow_creeping_vehicle_warns_without_braking(self):
+        creeping = FakeActor(2, 5.0, -2.0, 0.0, 2.0)
+
+        information = self.safety.inspect(
+            FakeWorld([self.ego, creeping]),
+            self.ego,
+            active=True
+        )
+
+        self.assertEqual(
+            information["safety_state"],
+            self.safety.WARNING
         )
 
     def test_detection_is_disabled_outside_intersection(self):

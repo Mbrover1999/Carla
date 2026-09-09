@@ -2,7 +2,8 @@ from config import (
     ROAD_SPEED_BRAKE_GAIN,
     ROAD_SPEED_DEADBAND_KMH,
     ROAD_SPEED_DEFAULT_LIMIT_KMH,
-    ROAD_SPEED_JUNCTION_TARGET_KMH,
+    ROAD_SPEED_JUNCTION_LIMIT_FACTOR,
+    ROAD_SPEED_JUNCTION_MAX_TARGET_KMH,
     ROAD_SPEED_LIMIT_FACTOR,
     ROAD_SPEED_MAX_BRAKE,
     ROAD_SPEED_MAX_TARGET_KMH,
@@ -42,7 +43,8 @@ class RoadSpeedController:
         ):
             target_speed = min(
                 target_speed,
-                ROAD_SPEED_JUNCTION_TARGET_KMH
+                speed_limit * ROAD_SPEED_JUNCTION_LIMIT_FACTOR,
+                ROAD_SPEED_JUNCTION_MAX_TARGET_KMH
             )
 
         speed_error = target_speed - current_speed_kmh

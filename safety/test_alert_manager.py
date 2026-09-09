@@ -71,6 +71,12 @@ class SafetyAlertManagerTests(unittest.TestCase):
 
         self.assertEqual(play_sound.call_count, 2)
 
+    def test_project_alert_sounds_are_available(self):
+        manager = SafetyAlertManager(sound_enabled=True)
+
+        self.assertIsNotNone(manager._sound_path(urgent=False))
+        self.assertIsNotNone(manager._sound_path(urgent=True))
+
 
 if __name__ == "__main__":
     unittest.main()

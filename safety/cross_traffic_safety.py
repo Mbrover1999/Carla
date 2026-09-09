@@ -8,9 +8,12 @@ from config import (
     CROSS_TRAFFIC_HOLD_BRAKE,
     CROSS_TRAFFIC_HOLD_SPEED_KMH,
     CROSS_TRAFFIC_MIN_ACTOR_SPEED_MPS,
+    CROSS_TRAFFIC_MIN_BRAKING_ACTOR_SPEED_MPS,
     CROSS_TRAFFIC_MIN_CROSSING_ANGLE_DEGREES,
     CROSS_TRAFFIC_PATH_LOOKAHEAD_METERS,
     CROSS_TRAFFIC_TIME_HORIZON_SECONDS,
+    CROSS_TRAFFIC_WAITING_BRAKE_THRESHOLD,
+    CROSS_TRAFFIC_WAITING_MAX_SPEED_MPS,
     CROSS_TRAFFIC_WARNING_TIME_GAP_SECONDS
 )
 
@@ -73,8 +76,12 @@ class CrossTrafficSafety:
 
         state = (
             self.BRAKING
-            if most_urgent["arrival_gap_s"]
-            <= CROSS_TRAFFIC_BRAKE_TIME_GAP_SECONDS
+            if (
+                most_urgent["arrival_gap_s"]
+                <= CROSS_TRAFFIC_BRAKE_TIME_GAP_SECONDS
+                and most_urgent["actor_speed_mps"]
+                >= CROSS_TRAFFIC_MIN_BRAKING_ACTOR_SPEED_MPS
+            )
             else self.WARNING
         )
 
@@ -127,6 +134,9 @@ class CrossTrafficSafety:
         )
 
         if actor_speed < CROSS_TRAFFIC_MIN_ACTOR_SPEED_MPS:
+            return None
+
+        if self._is_waiting(actor, actor_speed):
             return None
 
         actor_direction = (
@@ -188,8 +198,37 @@ class CrossTrafficSafety:
             "distance_m": distance,
             "ego_time_s": ego_time,
             "actor_time_s": actor_time,
-            "arrival_gap_s": arrival_gap
+            "arrival_gap_s": arrival_gap,
+            "actor_speed_mps": actor_speed
         }
+
+    @staticmethod
+    def _is_waiting(actor, actor_speed):
+        if actor_speed > CROSS_TRAFFIC_WAITING_MAX_SPEED_MPS:
+            return False
+
+        try:
+            control = actor.get_control()
+
+            if (
+                getattr(control, "brake", 0.0)
+                >= CROSS_TRAFFIC_WAITING_BRAKE_THRESHOLD
+            ):
+                return True
+        except (AttributeError, RuntimeError):
+            pass
+
+        try:
+            if actor.is_at_traffic_light():
+                state = actor.get_traffic_light_state()
+                state_name = getattr(state, "name", str(state))
+
+                if str(state_name).upper() == "RED":
+                    return True
+        except (AttributeError, RuntimeError):
+            pass
+
+        return False
 
     @staticmethod
     def _nearby_vehicles(world):

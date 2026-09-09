@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from safety.safety_layer import SafetyLayer
 
@@ -67,6 +68,52 @@ class SafetyLayerTests(unittest.TestCase):
 
         self.assertEqual(state, "BRAKING")
         self.assertGreater(control.brake, 0.0)
+
+    def test_vehicle_in_opposite_lane_is_not_relevant(self):
+        ego = FakeActor("vehicle.ego", lane_id=1)
+        obstacle = FakeActor("vehicle.truck", lane_id=-1)
+        world_map = FakeMap(road_id=7)
+
+        self.assertFalse(
+            self.layer.is_obstacle_relevant(
+                ego,
+                obstacle,
+                world_map
+            )
+        )
+
+    def test_vehicle_in_same_lane_remains_relevant(self):
+        ego = FakeActor("vehicle.ego", lane_id=1)
+        obstacle = FakeActor("vehicle.truck", lane_id=1)
+        world_map = FakeMap(road_id=7)
+
+        self.assertTrue(
+            self.layer.is_obstacle_relevant(
+                ego,
+                obstacle,
+                world_map
+            )
+        )
+
+
+class FakeActor:
+    def __init__(self, type_id, lane_id):
+        self.type_id = type_id
+        self.location = SimpleNamespace(lane_id=lane_id)
+
+    def get_location(self):
+        return self.location
+
+
+class FakeMap:
+    def __init__(self, road_id):
+        self.road_id = road_id
+
+    def get_waypoint(self, location, project_to_road=True):
+        return SimpleNamespace(
+            road_id=self.road_id,
+            lane_id=location.lane_id
+        )
 
 
 if __name__ == "__main__":

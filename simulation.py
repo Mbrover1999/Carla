@@ -520,6 +520,9 @@ def get_intervention_reason(
         ),
         TrafficLightSafety.RED_BRAKING: (
             "Red traffic light - stopping"
+        ),
+        TrafficLightSafety.RED_CREEPING: (
+            "Red traffic light - approaching stop line"
         )
     }
 
@@ -766,8 +769,18 @@ def run_simulation(
 
                 (
                     obstacle_distance,
-                    _
+                    obstacle_actor
                 ) = sensors.get_latest_obstacle()
+
+                if (
+                    obstacle_distance is not None
+                    and not safety_layer.is_obstacle_relevant(
+                        ego_vehicle=ego_vehicle,
+                        obstacle_actor=obstacle_actor,
+                        world_map=world.get_map()
+                    )
+                ):
+                    obstacle_distance = None
 
                 (
                     collision_detected,

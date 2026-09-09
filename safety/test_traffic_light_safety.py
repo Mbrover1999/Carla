@@ -25,11 +25,15 @@ class FakeControl:
 
 
 class FakeTrafficLight:
-    def __init__(self, state, actor_id=42):
+    def __init__(self, state, actor_id=42, distance=10.0):
         self.state = SimpleNamespace(name=state)
         self.id = actor_id
         self.trigger_volume = SimpleNamespace(
-            location=SimpleNamespace(x=10.0, y=0.0, z=0.0)
+            location=SimpleNamespace(
+                x=distance,
+                y=0.0,
+                z=0.0
+            )
         )
 
     def get_state(self):
@@ -87,7 +91,9 @@ class TrafficLightSafetyTests(unittest.TestCase):
         )
 
     def test_red_light_removes_throttle_and_brakes(self):
-        vehicle = FakeVehicle(FakeTrafficLight("Red"))
+        vehicle = FakeVehicle(
+            FakeTrafficLight("Red", distance=5.0)
+        )
         information = self.safety.inspect(vehicle)
 
         result = self.safety.apply(
@@ -101,7 +107,9 @@ class TrafficLightSafetyTests(unittest.TestCase):
         self.assertEqual(result.steer, 0.1)
 
     def test_red_light_holds_stopped_vehicle(self):
-        vehicle = FakeVehicle(FakeTrafficLight("Red"))
+        vehicle = FakeVehicle(
+            FakeTrafficLight("Red", distance=2.0)
+        )
         information = self.safety.inspect(vehicle)
 
         result = self.safety.apply(
@@ -111,6 +119,44 @@ class TrafficLightSafetyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.brake, 1.0)
+
+    def test_distant_red_light_does_not_brake_early(self):
+        vehicle = FakeVehicle(
+            FakeTrafficLight("Red", distance=15.0)
+        )
+        information = self.safety.inspect(vehicle)
+        requested = FakeControl(throttle=0.3)
+
+        result = self.safety.apply(
+            requested,
+            information,
+            speed_kmh=20.0
+        )
+
+        self.assertIs(result, requested)
+        self.assertEqual(
+            information["safety_state"],
+            self.safety.CLEAR
+        )
+
+    def test_stopped_vehicle_creeps_toward_stop_line(self):
+        vehicle = FakeVehicle(
+            FakeTrafficLight("Red", distance=5.0)
+        )
+        information = self.safety.inspect(vehicle)
+
+        result = self.safety.apply(
+            FakeControl(throttle=0.2),
+            information,
+            speed_kmh=0.5
+        )
+
+        self.assertEqual(result.brake, 0.0)
+        self.assertEqual(result.throttle, 0.05)
+        self.assertEqual(
+            information["safety_state"],
+            self.safety.RED_CREEPING
+        )
 
     def test_distance_and_event_key_are_reported(self):
         information = self.safety.inspect(

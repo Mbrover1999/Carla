@@ -1,9 +1,14 @@
 import math
 
 from config import (
+    TRAFFIC_LIGHT_BRAKING_TIME_SECONDS,
+    TRAFFIC_LIGHT_CREEP_MAX_SPEED_KMH,
+    TRAFFIC_LIGHT_CREEP_THROTTLE,
     TRAFFIC_LIGHT_HOLD_BRAKE,
     TRAFFIC_LIGHT_HOLD_SPEED_KMH,
-    TRAFFIC_LIGHT_RED_BRAKE
+    TRAFFIC_LIGHT_MIN_BRAKING_RANGE_METERS,
+    TRAFFIC_LIGHT_RED_BRAKE,
+    TRAFFIC_LIGHT_STOP_DISTANCE_METERS
 )
 
 
@@ -17,6 +22,7 @@ class TrafficLightSafety:
 
     CLEAR = "CLEAR"
     YELLOW_WARNING = "TRAFFIC_LIGHT_YELLOW"
+    RED_CREEPING = "TRAFFIC_LIGHT_RED_CREEPING"
     RED_BRAKING = "TRAFFIC_LIGHT_RED_BRAKING"
 
     def __init__(
@@ -41,9 +47,7 @@ class TrafficLightSafety:
 
         safety_state = self.CLEAR
 
-        if light_state == self.RED:
-            safety_state = self.RED_BRAKING
-        elif light_state == self.YELLOW:
+        if light_state == self.YELLOW:
             safety_state = self.YELLOW_WARNING
 
         actor_id = getattr(traffic_light, "id", None)
@@ -68,6 +72,51 @@ class TrafficLightSafety:
         if traffic_light_information["light_state"] != self.RED:
             return requested_control
 
+        distance = traffic_light_information.get("distance_m")
+        speed_mps = speed_kmh / 3.6
+        braking_range = (
+            TRAFFIC_LIGHT_STOP_DISTANCE_METERS
+            + max(
+                TRAFFIC_LIGHT_MIN_BRAKING_RANGE_METERS,
+                speed_mps * TRAFFIC_LIGHT_BRAKING_TIME_SECONDS
+            )
+        )
+
+        if distance is not None and distance > braking_range:
+            self._set_safety_state(
+                traffic_light_information,
+                self.CLEAR
+            )
+            return requested_control
+
+        if (
+            distance is not None
+            and distance > TRAFFIC_LIGHT_STOP_DISTANCE_METERS
+            and speed_kmh <= TRAFFIC_LIGHT_CREEP_MAX_SPEED_KMH
+        ):
+            self._set_safety_state(
+                traffic_light_information,
+                self.RED_CREEPING
+            )
+
+            # Do not release a brake requested by another safety system.
+            if requested_control.brake > 0.0:
+                return requested_control
+
+            return self._copy_control(
+                requested_control,
+                throttle=min(
+                    requested_control.throttle,
+                    TRAFFIC_LIGHT_CREEP_THROTTLE
+                ),
+                brake=0.0
+            )
+
+        self._set_safety_state(
+            traffic_light_information,
+            self.RED_BRAKING
+        )
+
         brake_amount = (
             self.hold_brake
             if speed_kmh <= self.hold_speed_kmh
@@ -81,6 +130,15 @@ class TrafficLightSafety:
                 requested_control.brake,
                 brake_amount
             )
+        )
+
+    @staticmethod
+    def _set_safety_state(information, safety_state):
+        information["safety_state"] = safety_state
+        information["event_key"] = (
+            information.get("actor_id"),
+            information.get("light_state"),
+            safety_state
         )
 
     @classmethod

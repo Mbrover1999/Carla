@@ -16,6 +16,45 @@ from config import (
 
 
 class SafetyLayer:
+    @staticmethod
+    def is_obstacle_relevant(
+        ego_vehicle,
+        obstacle_actor,
+        world_map
+    ):
+        if obstacle_actor is None:
+            return True
+
+        actor_type = getattr(obstacle_actor, "type_id", "")
+
+        if not actor_type.startswith("vehicle."):
+            return True
+
+        try:
+            ego_waypoint = world_map.get_waypoint(
+                ego_vehicle.get_location(),
+                project_to_road=True
+            )
+            obstacle_waypoint = world_map.get_waypoint(
+                obstacle_actor.get_location(),
+                project_to_road=True
+            )
+        except (AttributeError, RuntimeError):
+            return True
+
+        if ego_waypoint is None or obstacle_waypoint is None:
+            return True
+
+        same_road = (
+            getattr(ego_waypoint, "road_id", None)
+            == getattr(obstacle_waypoint, "road_id", None)
+        )
+        ego_lane = getattr(ego_waypoint, "lane_id", 0)
+        obstacle_lane = getattr(obstacle_waypoint, "lane_id", 0)
+        opposite_direction = ego_lane * obstacle_lane < 0
+
+        return not (same_road and opposite_direction)
+
     def apply(
         self,
         requested_control,
