@@ -63,6 +63,7 @@ def main(
     sensor_list = []
     created_vehicles = []
     data_collector = None
+    scenario_runtime = None
 
     try:
         print(f"Starting scenario: {scenario_id}")
@@ -161,6 +162,9 @@ def main(
 
     finally:
         try:
+            if scenario_runtime is not None:
+                scenario_runtime.close()
+
             if data_collector is not None:
                 data_collector.close()
 

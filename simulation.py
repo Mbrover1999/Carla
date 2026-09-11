@@ -712,6 +712,9 @@ def run_simulation(
     safety_event_key = None
     last_console_event_state = None
     termination_reason = "COMPLETED"
+    scenario_elapsed_seconds = 0.0
+    scenario_inactivity_active = False
+    scenario_lane_keeping_suppressed = False
 
     try:
         while time.time() < end_time:
@@ -724,9 +727,23 @@ def run_simulation(
 
             world.wait_for_tick()
 
+            scenario_elapsed_seconds = (
+                time.time() - simulation_start_time
+            )
+
             if scenario_runtime is not None:
                 scenario_runtime.update(
-                    time.time() - simulation_start_time
+                    scenario_elapsed_seconds
+                )
+                scenario_inactivity_active = (
+                    scenario_runtime.controller_inactive(
+                        scenario_elapsed_seconds
+                    )
+                )
+                scenario_lane_keeping_suppressed = (
+                    scenario_runtime.suppress_lane_keeping(
+                        scenario_elapsed_seconds
+                    )
                 )
 
             update_spectator(
@@ -749,7 +766,10 @@ def run_simulation(
                 controller_responded = False
 
                 if (
-                    not inactivity_test_active
+                    not (
+                        inactivity_test_active
+                        or scenario_inactivity_active
+                    )
                     or requested_control is None
                 ):
                     try:
@@ -852,7 +872,23 @@ def run_simulation(
                         vehicle=ego_vehicle,
                         requested_control=requested_control,
                         current_speed_kmh=speed_kmh,
-                        navigation_mode=navigation_mode
+                        navigation_mode=navigation_mode,
+                        maneuver=(
+                            navigation_information["maneuver"]
+                            if navigation_information is not None
+                            else None
+                        )
+                    )
+
+                if (
+                    scenario_runtime is not None
+                    and requested_control is not None
+                ):
+                    requested_control = (
+                        scenario_runtime.apply_requested_control(
+                            scenario_elapsed_seconds,
+                            requested_control
+                        )
                     )
 
                 (
@@ -974,6 +1010,7 @@ def run_simulation(
                     SAFETY_ENABLED
                     and controller_responded
                     and lane_keeping_enabled
+                    and not scenario_lane_keeping_suppressed
                     and navigation_mode == RouteManager.AI
                     and inactivity_state
                     != ControllerInactivityDetector.SAFE_STOP
@@ -1157,6 +1194,7 @@ def run_simulation(
                 if (
                     data_collector is not None
                     and not inactivity_test_active
+                    and not scenario_inactivity_active
                 ):
                     data_collector.save_sample(
                         image=frame,
@@ -1180,6 +1218,7 @@ def run_simulation(
                         inactivity_seconds=inactivity_seconds,
                         inactivity_test_active=(
                             inactivity_test_active
+                            or scenario_inactivity_active
                         ),
                         emergency_information=(
                             emergency_information

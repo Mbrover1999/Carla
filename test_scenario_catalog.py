@@ -89,13 +89,13 @@ class ScenarioCatalogTests(unittest.TestCase):
             preset
         )
 
-    def test_unimplemented_scenario_cannot_start(self):
-        with self.assertRaisesRegex(ValueError, "not implemented"):
-            SimulationSettings(
-                scenario_id="cross_traffic",
-                duration_minutes=5,
-                traffic_vehicles=20
-            ).validate()
+    def test_all_scenarios_are_available(self):
+        self.assertTrue(all(scenario.implemented for scenario in SCENARIOS))
+
+    def test_driver_inactivity_runs_long_enough_for_emergency_call(self):
+        scenario = get_scenario("driver_inactivity")
+
+        self.assertGreaterEqual(scenario.demo_duration_minutes, 3)
 
     def test_unknown_scenario_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unknown scenario"):

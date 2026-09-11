@@ -35,7 +35,7 @@ class RoadSpeedControllerTests(unittest.TestCase):
     def setUp(self):
         self.controller = RoadSpeedController()
 
-    def test_uses_full_road_speed_limit(self):
+    def test_uses_98_percent_of_road_speed_limit(self):
         _, information = self.controller.apply(
             FakeVehicle(50.0),
             FakeControl(),
@@ -44,7 +44,20 @@ class RoadSpeedControllerTests(unittest.TestCase):
         )
 
         self.assertEqual(information["speed_limit_kmh"], 50.0)
-        self.assertEqual(information["target_speed_kmh"], 50.0)
+        self.assertEqual(information["target_speed_kmh"], 49.0)
+
+    def test_98_percent_target_is_not_capped_on_faster_roads(self):
+        _, information = self.controller.apply(
+            FakeVehicle(80.0),
+            FakeControl(),
+            current_speed_kmh=60.0,
+            navigation_mode="AI"
+        )
+
+        self.assertAlmostEqual(
+            information["target_speed_kmh"],
+            78.4
+        )
 
     def test_accelerates_below_target_speed(self):
         control, _ = self.controller.apply(
@@ -73,7 +86,8 @@ class RoadSpeedControllerTests(unittest.TestCase):
             FakeVehicle(50.0),
             FakeControl(),
             current_speed_kmh=30.0,
-            navigation_mode="APPROACH"
+            navigation_mode="APPROACH",
+            maneuver="RIGHT"
         )
 
         self.assertEqual(information["target_speed_kmh"], 30.0)
@@ -83,10 +97,22 @@ class RoadSpeedControllerTests(unittest.TestCase):
             FakeVehicle(30.0),
             FakeControl(),
             current_speed_kmh=20.0,
-            navigation_mode="INTERSECTION"
+            navigation_mode="INTERSECTION",
+            maneuver="LEFT"
         )
 
         self.assertEqual(information["target_speed_kmh"], 22.5)
+
+    def test_straight_intersection_keeps_98_percent_target(self):
+        _, information = self.controller.apply(
+            FakeVehicle(50.0),
+            FakeControl(),
+            current_speed_kmh=30.0,
+            navigation_mode="APPROACH",
+            maneuver="STRAIGHT"
+        )
+
+        self.assertEqual(information["target_speed_kmh"], 49.0)
 
     def test_keeps_last_valid_limit_after_spawn_gap(self):
         self.controller.apply(

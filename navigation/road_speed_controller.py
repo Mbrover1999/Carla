@@ -23,7 +23,8 @@ class RoadSpeedController:
         vehicle,
         requested_control,
         current_speed_kmh,
-        navigation_mode
+        navigation_mode,
+        maneuver=None
     ):
         speed_limit = float(vehicle.get_speed_limit() or 0.0)
 
@@ -37,10 +38,12 @@ class RoadSpeedController:
             ROAD_SPEED_MAX_TARGET_KMH
         )
 
-        if navigation_mode in (
-            "APPROACH",
-            "INTERSECTION"
-        ):
+        turning = (
+            navigation_mode in ("APPROACH", "INTERSECTION")
+            and str(maneuver).upper() in ("LEFT", "RIGHT")
+        )
+
+        if turning:
             target_speed = min(
                 target_speed,
                 speed_limit * ROAD_SPEED_JUNCTION_LIMIT_FACTOR,

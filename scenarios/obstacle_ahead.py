@@ -144,6 +144,9 @@ class ObstacleAheadScenario:
             ):
                 continue
 
+            if not self._is_demo_waypoint_suitable(waypoint):
+                continue
+
             straight_candidate = self._straight_waypoint_ahead(
                 waypoint,
                 self.DISTANCE_CANDIDATES_METERS[0]
@@ -168,6 +171,10 @@ class ObstacleAheadScenario:
             return waypoint
 
         return None
+
+    @staticmethod
+    def _is_demo_waypoint_suitable(_waypoint):
+        return True
 
     def _straight_waypoint_ahead(self, start_waypoint, distance):
         """Return a waypoint only when the whole path ahead is straight."""

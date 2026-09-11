@@ -42,6 +42,7 @@ class ScenarioDefinition:
     title: str
     description: str
     implemented: bool = False
+    demo_duration_minutes: int = 1
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,8 @@ SCENARIOS = (
         description=(
             "Approach an intersection while another vehicle crosses the "
             "planned path."
-        )
+        ),
+        implemented=True
     ),
     ScenarioDefinition(
         scenario_id="lane_departure",
@@ -127,7 +129,8 @@ SCENARIOS = (
         description=(
             "Trigger a controlled lane departure and demonstrate the lane "
             "keeping response."
-        )
+        ),
+        implemented=True
     ),
     ScenarioDefinition(
         scenario_id="red_traffic_light",
@@ -135,7 +138,8 @@ SCENARIOS = (
         description=(
             "Approach a red traffic light and stop naturally near the stop "
             "line."
-        )
+        ),
+        implemented=True
     ),
     ScenarioDefinition(
         scenario_id="driver_inactivity",
@@ -143,7 +147,9 @@ SCENARIOS = (
         description=(
             "Simulate an unresponsive driver, move right, stop on the "
             "shoulder and start a simulated emergency call."
-        )
+        ),
+        implemented=True,
+        demo_duration_minutes=3
     )
 )
 
