@@ -1,12 +1,16 @@
+import math
+
 from scenarios.obstacle_ahead import ObstacleAheadScenario
 from scenarios.red_traffic_light import RedTrafficLightScenario
 
 
 class CrossTrafficScenario(ObstacleAheadScenario):
-    EGO_APPROACH_DISTANCE_METERS = 17.0
-    CROSS_APPROACH_DISTANCE_METERS = 5.0
-    CROSSING_START_SECONDS = 2.0
-    CROSSING_STOP_SECONDS = 7.0
+    EGO_APPROACH_DISTANCE_METERS = 24.0
+    CROSS_APPROACH_DISTANCE_METERS = 12.0
+    ACTIVATION_DISTANCE_METERS = 27.0
+    CROSSING_TIMEOUT_SECONDS = 12.0
+    MIN_CROSSING_SPEED_MPS = 2.8
+    MAX_CROSSING_SPEED_MPS = 9.0
     CROSSING_THROTTLE = 0.65
 
     def __init__(self):
@@ -15,6 +19,9 @@ class CrossTrafficScenario(ObstacleAheadScenario):
         self.crossing_stopped = False
         self.traffic_light = None
         self.original_light_state = None
+        self.ego_vehicle = None
+        self.conflict_location = None
+        self.crossing_direction = None
 
     def setup(self, world, ego_vehicle):
         blueprint = self._select_blueprint(
@@ -22,7 +29,7 @@ class CrossTrafficScenario(ObstacleAheadScenario):
         )
 
         for approaches in self._intersection_approaches(world):
-            ego_light, ego_stop, cross_stop = approaches
+            ego_light, ego_stop, cross_stop, conflict_location = approaches
             ego_waypoints = ego_stop.previous(
                 self.EGO_APPROACH_DISTANCE_METERS
             )
@@ -64,6 +71,9 @@ class CrossTrafficScenario(ObstacleAheadScenario):
                         continue
 
                     self.crossing_vehicle = crossing_vehicle
+                    self.ego_vehicle = ego_vehicle
+                    self.conflict_location = conflict_location
+                    self.crossing_direction = self._direction(cross_waypoint)
                     print(
                         "SCENARIO_EVENT: Cross Traffic demo ready; a "
                         "vehicle will enter from the side",
@@ -79,28 +89,46 @@ class CrossTrafficScenario(ObstacleAheadScenario):
         if self.crossing_vehicle is None:
             return
 
-        if (
-            elapsed_seconds >= self.CROSSING_START_SECONDS
-            and not self.crossing_started
-        ):
+        if not self.crossing_started and self._should_start_crossing():
+            crossing_speed = self._synchronized_crossing_speed()
             control = self.crossing_vehicle.get_control()
             control.throttle = self.CROSSING_THROTTLE
             control.steer = 0.0
             control.brake = 0.0
             control.hand_brake = False
             self.crossing_vehicle.apply_control(control)
+            self._enable_constant_velocity(crossing_speed)
             self.crossing_started = True
             print(
-                "SCENARIO_EVENT: Cross-traffic vehicle entered the junction",
+                "SCENARIO_EVENT: Cross-traffic vehicle entered the "
+                f"collision path at {crossing_speed:.1f} m/s",
                 flush=True
             )
 
         if (
-            elapsed_seconds >= self.CROSSING_STOP_SECONDS
+            self.crossing_started
+            and not self.crossing_stopped
+            and self._distance_to_conflict(self.crossing_vehicle) > 8.0
+        ):
+            self._enable_constant_velocity(
+                self._synchronized_crossing_speed()
+            )
+
+        if (
+            self.crossing_started
+            and (
+                elapsed_seconds >= self.CROSSING_TIMEOUT_SECONDS
+                or self._crossing_vehicle_cleared_conflict()
+            )
             and not self.crossing_stopped
         ):
+            self._disable_constant_velocity()
             self._hold_with_brake(self.crossing_vehicle)
             self.crossing_stopped = True
+
+    @staticmethod
+    def force_cross_traffic_detection(_elapsed_seconds):
+        return True
 
     def close(self):
         if self.traffic_light is None:
@@ -170,8 +198,128 @@ class CrossTrafficScenario(ObstacleAheadScenario):
                         second_stop
                     )
 
-                    if 50.0 <= angle <= 130.0:
-                        yield first_light, first_stop, second_stop
+                    conflict = cls._line_conflict(
+                        first_stop,
+                        second_stop
+                    )
+
+                    if (
+                        50.0 <= angle <= 130.0
+                        and conflict is not None
+                    ):
+                        yield (
+                            first_light,
+                            first_stop,
+                            second_stop,
+                            conflict
+                        )
+
+    def _should_start_crossing(self):
+        if self.ego_vehicle is None or self.conflict_location is None:
+            return False
+
+        velocity = self.ego_vehicle.get_velocity()
+        ego_speed = math.hypot(velocity.x, velocity.y)
+        return (
+            ego_speed >= 2.5
+            and self._distance_to_conflict(self.ego_vehicle)
+            <= self.ACTIVATION_DISTANCE_METERS
+        )
+
+    def _synchronized_crossing_speed(self):
+        ego_distance = self._distance_to_conflict(self.ego_vehicle)
+        crossing_distance = self._distance_to_conflict(
+            self.crossing_vehicle
+        )
+        ego_velocity = self.ego_vehicle.get_velocity()
+        ego_speed = max(
+            math.hypot(ego_velocity.x, ego_velocity.y),
+            2.5
+        )
+        ego_arrival_seconds = max(1.0, ego_distance / ego_speed)
+        requested_speed = crossing_distance / ego_arrival_seconds
+        return self._clip(
+            requested_speed,
+            self.MIN_CROSSING_SPEED_MPS,
+            self.MAX_CROSSING_SPEED_MPS
+        )
+
+    def _enable_constant_velocity(self, speed_mps):
+        try:
+            velocity = self.crossing_vehicle.get_velocity()
+            velocity.x = self.crossing_direction[0] * speed_mps
+            velocity.y = self.crossing_direction[1] * speed_mps
+            velocity.z = 0.0
+            self.crossing_vehicle.enable_constant_velocity(velocity)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _disable_constant_velocity(self):
+        try:
+            self.crossing_vehicle.disable_constant_velocity()
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _crossing_vehicle_cleared_conflict(self):
+        if self._distance_to_conflict(self.crossing_vehicle) > 12.0:
+            actor_location = self.crossing_vehicle.get_location()
+            offset_x = actor_location.x - self.conflict_location[0]
+            offset_y = actor_location.y - self.conflict_location[1]
+            return (
+                offset_x * self.crossing_direction[0]
+                + offset_y * self.crossing_direction[1]
+            ) > 0.0
+
+        return False
+
+    def _distance_to_conflict(self, vehicle):
+        location = vehicle.get_location()
+        return math.hypot(
+            location.x - self.conflict_location[0],
+            location.y - self.conflict_location[1]
+        )
+
+    @classmethod
+    def _line_conflict(cls, first_waypoint, second_waypoint):
+        first_location = first_waypoint.transform.location
+        second_location = second_waypoint.transform.location
+        first_direction = cls._direction(first_waypoint)
+        second_direction = cls._direction(second_waypoint)
+        denominator = cls._cross(first_direction, second_direction)
+
+        if abs(denominator) < 0.01:
+            return None
+
+        offset = (
+            second_location.x - first_location.x,
+            second_location.y - first_location.y
+        )
+        first_distance = cls._cross(offset, second_direction) / denominator
+        second_distance = cls._cross(offset, first_direction) / denominator
+
+        if not (0.0 <= first_distance <= 25.0):
+            return None
+
+        if not (0.0 <= second_distance <= 25.0):
+            return None
+
+        return (
+            first_location.x + first_direction[0] * first_distance,
+            first_location.y + first_direction[1] * first_distance
+        )
+
+    @staticmethod
+    def _direction(waypoint):
+        yaw = math.radians(waypoint.transform.rotation.yaw)
+        return math.cos(yaw), math.sin(yaw)
+
+    @staticmethod
+    def _cross(first, second):
+        return first[0] * second[1] - first[1] * second[0]
+
+    @staticmethod
+    def _clip(value, minimum, maximum):
+        return max(minimum, min(value, maximum))
 
     @staticmethod
     def _heading_difference(first_waypoint, second_waypoint):

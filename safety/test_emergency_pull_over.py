@@ -195,6 +195,34 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             self.controller.WAITING_FOR_RIGHT_LANE
         )
 
+    def test_vehicle_farther_ahead_in_shoulder_corridor_blocks_merge(self):
+        current = FakeWaypoint(1, 0.0)
+        shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
+        current.right_lane = shoulder
+        blocking_vehicle = SimpleNamespace(
+            id=2,
+            get_location=lambda: location(x=22.0, y=3.5)
+        )
+        world = SimpleNamespace(get_actors=lambda: [blocking_vehicle])
+        world_map = FakeMap(current)
+
+        control, information = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            world_map,
+            speed_kmh=10.0,
+            inactive_seconds=5.0,
+            now=10.0,
+            world=world
+        )
+
+        self.assertEqual(control.steer, 0.0)
+        self.assertGreater(control.brake, 0.0)
+        self.assertEqual(
+            information["phase"],
+            self.controller.WAITING_FOR_RIGHT_LANE
+        )
+
     def test_brakes_immediately_after_entering_shoulder(self):
         current = FakeWaypoint(1, 0.0)
         shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")

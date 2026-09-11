@@ -20,12 +20,20 @@ class FakeLightState(Enum):
 
 
 class DemoWaypoint(FakeWaypoint):
-    def __init__(self, distance=0.0, yaw=0.0):
+    def __init__(self, distance=0.0, yaw=0.0, x=None, y=0.0):
         super().__init__(distance)
+        self.transform.location.x = distance if x is None else x
+        self.transform.location.y = y
         self.transform.rotation.yaw = yaw
 
     def previous(self, distance):
-        return [DemoWaypoint(self.distance - distance, self.transform.rotation.yaw)]
+        yaw = self.transform.rotation.yaw
+        radians = __import__("math").radians(yaw)
+        return [DemoWaypoint(
+            yaw=yaw,
+            x=self.transform.location.x - __import__("math").cos(radians) * distance,
+            y=self.transform.location.y - __import__("math").sin(radians) * distance
+        )]
 
 
 class FakeTrafficLight:
@@ -82,13 +90,21 @@ class DemoScenarioTests(unittest.TestCase):
 
         drift_control = scenario.apply_requested_control(4.5, control)
 
-        self.assertEqual(drift_control.steer, scenario.DEPARTURE_STEERING)
+        self.assertGreaterEqual(
+            drift_control.steer,
+            scenario.MIN_DEPARTURE_STEERING
+        )
+        self.assertLessEqual(
+            drift_control.steer,
+            scenario.MAX_DEPARTURE_STEERING
+        )
         self.assertTrue(scenario.suppress_lane_keeping(4.5))
+        scenario.notify_lane_invasion(True)
         self.assertIs(
-            scenario.apply_requested_control(6.0, control),
+            scenario.apply_requested_control(4.6, control),
             control
         )
-        self.assertFalse(scenario.suppress_lane_keeping(6.0))
+        self.assertFalse(scenario.suppress_lane_keeping(4.6))
 
     def test_driver_inactivity_starts_after_initial_drive(self):
         scenario = DriverInactivityScenario()
@@ -127,15 +143,22 @@ class DemoScenarioTests(unittest.TestCase):
         crossing_vehicle = actors[0]
 
         self.assertEqual(crossing_vehicle.control.brake, 1.0)
-        scenario.update(1.9)
-        self.assertEqual(crossing_vehicle.control.throttle, 0.0)
-        scenario.update(2.0)
+        scenario.ego_vehicle.velocity = SimpleNamespace(
+            x=5.0,
+            y=0.0,
+            z=0.0
+        )
+        scenario.update(0.1)
         self.assertEqual(
             crossing_vehicle.control.throttle,
             scenario.CROSSING_THROTTLE
         )
         self.assertEqual(crossing_vehicle.control.brake, 0.0)
-        scenario.update(7.0)
+        self.assertGreaterEqual(
+            crossing_vehicle.get_velocity().y,
+            scenario.MIN_CROSSING_SPEED_MPS
+        )
+        scenario.update(scenario.CROSSING_TIMEOUT_SECONDS)
         self.assertEqual(crossing_vehicle.control.brake, 1.0)
 
     def test_runtime_delegates_scenario_hooks(self):

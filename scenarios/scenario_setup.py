@@ -40,6 +40,24 @@ class ScenarioRuntime:
         )
         return bool(callback(elapsed_seconds)) if callable(callback) else False
 
+    def force_cross_traffic_detection(self, elapsed_seconds):
+        callback = getattr(
+            self.scenario,
+            "force_cross_traffic_detection",
+            None
+        )
+        return bool(callback(elapsed_seconds)) if callable(callback) else False
+
+    def notify_lane_invasion(self, detected):
+        callback = getattr(
+            self.scenario,
+            "notify_lane_invasion",
+            None
+        )
+
+        if callable(callback):
+            callback(detected)
+
     def close(self):
         callback = getattr(self.scenario, "close", None)
 

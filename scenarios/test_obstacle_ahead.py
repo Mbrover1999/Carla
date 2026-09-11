@@ -42,7 +42,30 @@ class FakeVehicle:
         self.transform = None
 
     def get_location(self):
+        if self.transform is not None:
+            return self.transform.location
         return SimpleNamespace(x=0.0, y=0.0, z=0.0)
+
+    def get_transform(self):
+        if self.transform is not None:
+            return self.transform
+        return SimpleNamespace(
+            location=self.get_location(),
+            rotation=SimpleNamespace(yaw=0.0)
+        )
+
+    def get_velocity(self):
+        return getattr(
+            self,
+            "velocity",
+            SimpleNamespace(x=0.0, y=0.0, z=0.0)
+        )
+
+    def enable_constant_velocity(self, velocity):
+        self.velocity = velocity
+
+    def disable_constant_velocity(self):
+        self.velocity = SimpleNamespace(x=0.0, y=0.0, z=0.0)
 
     def set_autopilot(self, enabled):
         self.autopilot = enabled

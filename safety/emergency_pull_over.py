@@ -7,6 +7,9 @@ from config import (
     EMERGENCY_PULL_OVER_BRAKE,
     EMERGENCY_PULL_OVER_LANE_REACHED_METERS,
     EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS,
+    EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS,
+    EMERGENCY_PULL_OVER_REAR_CLEARANCE_METERS,
+    EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS,
     EMERGENCY_PULL_OVER_LOOKAHEAD_METERS,
     EMERGENCY_PULL_OVER_MAX_STEERING,
     EMERGENCY_PULL_OVER_SHOULDER_ENTRY_METERS,
@@ -356,6 +359,13 @@ class EmergencyPullOverController:
         ego_location = ego_vehicle.get_location()
         target_road_id = getattr(target_lane, "road_id", None)
         target_lane_id = getattr(target_lane, "lane_id", None)
+        target_transform = target_lane.transform
+        target_location = target_transform.location
+        target_yaw = math.radians(target_transform.rotation.yaw)
+        forward_x = math.cos(target_yaw)
+        forward_y = math.sin(target_yaw)
+        right_x = -forward_y
+        right_y = forward_x
 
         for actor in vehicles:
             if getattr(actor, "id", None) == getattr(
@@ -374,23 +384,39 @@ class EmergencyPullOverController:
             except (AttributeError, RuntimeError):
                 continue
 
-            if actor_waypoint is None:
-                continue
+            same_target_lane = (
+                actor_waypoint is not None
+                and getattr(actor_waypoint, "road_id", None)
+                == target_road_id
+                and getattr(actor_waypoint, "lane_id", None)
+                == target_lane_id
+            )
 
-            if (
-                getattr(actor_waypoint, "road_id", None)
-                != target_road_id
-                or getattr(actor_waypoint, "lane_id", None)
-                != target_lane_id
-            ):
-                continue
+            offset_x = actor_location.x - target_location.x
+            offset_y = actor_location.y - target_location.y
+            longitudinal = offset_x * forward_x + offset_y * forward_y
+            lateral = abs(offset_x * right_x + offset_y * right_y)
+            inside_target_corridor = (
+                lateral
+                <= EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
+                and -EMERGENCY_PULL_OVER_REAR_CLEARANCE_METERS
+                <= longitudinal
+                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS
+            )
 
             distance = math.hypot(
                 actor_location.x - ego_location.x,
                 actor_location.y - ego_location.y
             )
 
-            if distance <= EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS:
+            if (
+                inside_target_corridor
+                or (
+                    same_target_lane
+                    and distance
+                    <= EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS
+                )
+            ):
                 return False
 
         return True

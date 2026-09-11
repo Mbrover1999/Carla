@@ -715,6 +715,7 @@ def run_simulation(
     scenario_elapsed_seconds = 0.0
     scenario_inactivity_active = False
     scenario_lane_keeping_suppressed = False
+    scenario_cross_traffic_active = False
 
     try:
         while time.time() < end_time:
@@ -742,6 +743,11 @@ def run_simulation(
                 )
                 scenario_lane_keeping_suppressed = (
                     scenario_runtime.suppress_lane_keeping(
+                        scenario_elapsed_seconds
+                    )
+                )
+                scenario_cross_traffic_active = (
+                    scenario_runtime.force_cross_traffic_detection(
                         scenario_elapsed_seconds
                     )
                 )
@@ -923,6 +929,11 @@ def run_simulation(
                     lane_markings = []
                     lane_event_key = None
 
+                if scenario_runtime is not None:
+                    scenario_runtime.notify_lane_invasion(
+                        lane_invasion_detected
+                    )
+
                 if SAFETY_ENABLED:
                     (
                         final_control,
@@ -940,9 +951,12 @@ def run_simulation(
                     SAFETY_ENABLED
                     and CROSS_TRAFFIC_DETECTION_ENABLED
                     and navigation_information is not None
-                    and navigation_mode in (
-                        RouteManager.APPROACH,
-                        RouteManager.INTERSECTION
+                    and (
+                        scenario_cross_traffic_active
+                        or navigation_mode in (
+                            RouteManager.APPROACH,
+                            RouteManager.INTERSECTION
+                        )
                     )
                 )
 
