@@ -25,6 +25,13 @@ from navigation.road_speed_controller import (
     RoadSpeedController
 )
 from navigation.route_manager import RouteManager
+from navigation.turn_signals import (
+    HAZARD,
+    LEFT,
+    OFF,
+    RIGHT,
+    select_turn_signal
+)
 from safety.inactivity_detector import (
     ControllerInactivityDetector
 )
@@ -62,24 +69,38 @@ def update_spectator(world, ego_vehicle):
     )
 
 
-def set_hazard_lights(vehicle, enabled):
+def set_vehicle_indicators(vehicle, signal=OFF):
     try:
         current_state = int(vehicle.get_light_state())
-        hazard_flags = int(
+        indicator_flags = int(
             carla.VehicleLightState.LeftBlinker
             | carla.VehicleLightState.RightBlinker
         )
-        updated_state = (
-            current_state | hazard_flags
-            if enabled
-            else current_state & ~hazard_flags
-        )
+        updated_state = current_state & ~indicator_flags
+
+        if signal in (LEFT, HAZARD):
+            updated_state |= int(
+                carla.VehicleLightState.LeftBlinker
+            )
+
+        if signal in (RIGHT, HAZARD):
+            updated_state |= int(
+                carla.VehicleLightState.RightBlinker
+            )
+
         vehicle.set_light_state(
             carla.VehicleLightState(updated_state)
         )
         return True
     except (AttributeError, RuntimeError, TypeError, ValueError):
         return False
+
+
+def set_hazard_lights(vehicle, enabled):
+    return set_vehicle_indicators(
+        vehicle,
+        HAZARD if enabled else OFF
+    )
 
 
 def draw_controller_information(
@@ -659,7 +680,7 @@ def run_simulation(
     emergency_information = (
         EmergencyPullOverController.information()
     )
-    hazards_active = False
+    indicator_signal = OFF
     intervention_reason = None
     intervention_urgent = False
     controller_error_active = False
@@ -687,15 +708,18 @@ def run_simulation(
     )
     road_speed_information = None
     safety_event_key = None
+    last_console_event_state = None
+    termination_reason = "COMPLETED"
 
     try:
-        while (
-            time.time() < end_time
-            and not (
+        while time.time() < end_time:
+            if (
                 stop_requested is not None
                 and stop_requested()
-            )
-        ):
+            ):
+                termination_reason = "STOPPED"
+                break
+
             world.wait_for_tick()
 
             update_spectator(
@@ -1010,13 +1034,21 @@ def run_simulation(
                 requested_hazards = emergency_information[
                     "hazards_active"
                 ]
+                requested_indicator = select_turn_signal(
+                    navigation_information,
+                    hazards_active=requested_hazards
+                )
 
-                if requested_hazards != hazards_active:
-                    if set_hazard_lights(
+                if requested_indicator != indicator_signal:
+                    if set_vehicle_indicators(
                         ego_vehicle,
-                        requested_hazards
+                        requested_indicator
                     ):
-                        hazards_active = requested_hazards
+                        indicator_signal = requested_indicator
+                        print(
+                            f"TURN_SIGNAL: {indicator_signal}",
+                            flush=True
+                        )
 
                 (
                     intervention_reason,
@@ -1061,32 +1093,41 @@ def run_simulation(
                     final_control
                 )
 
+                current_safety_state = combine_safety_states(
+                    obstacle_safety_state,
+                    inactivity_state,
+                    (
+                        "LANE_INVASION"
+                        if lane_invasion_detected
+                        else "CLEAR"
+                    ),
+                    (
+                        lane_keeping_information["state"]
+                        if lane_keeping_information["state"] in (
+                            LaneKeepingAssist.CORRECTING_LEFT,
+                            LaneKeepingAssist.CORRECTING_RIGHT
+                        )
+                        else "CLEAR"
+                    ),
+                    traffic_light_information[
+                        "safety_state"
+                    ],
+                    cross_traffic_information[
+                        "safety_state"
+                    ]
+                )
+
+                if current_safety_state != last_console_event_state:
+                    print(
+                        f"CURRENT_EVENT: {current_safety_state}",
+                        flush=True
+                    )
+                    last_console_event_state = current_safety_state
+
                 safety_logger.log_event(
                     speed_kmh=speed_kmh,
                     obstacle_distance=obstacle_distance,
-                    safety_state=combine_safety_states(
-                        obstacle_safety_state,
-                        inactivity_state,
-                        (
-                            "LANE_INVASION"
-                            if lane_invasion_detected
-                            else "CLEAR"
-                        ),
-                        (
-                            lane_keeping_information["state"]
-                            if lane_keeping_information["state"] in (
-                                LaneKeepingAssist.CORRECTING_LEFT,
-                                LaneKeepingAssist.CORRECTING_RIGHT
-                            )
-                            else "CLEAR"
-                        ),
-                        traffic_light_information[
-                            "safety_state"
-                        ],
-                        cross_traffic_information[
-                            "safety_state"
-                        ]
-                    ),
+                    safety_state=current_safety_state,
                     control=final_control,
                     collision=collision_detected,
                     collision_actor=collision_actor,
@@ -1177,6 +1218,7 @@ def run_simulation(
                 ord("q"),
                 27
             ):
+                termination_reason = "STOPPED"
                 break
 
             if pressed_key in (
@@ -1224,10 +1266,31 @@ def run_simulation(
                 route_manager.plan_new_route()
                 intersection_controller.reset()
 
-    finally:
-        if hazards_active:
-            set_hazard_lights(ego_vehicle, False)
+        return termination_reason
 
-        alert_manager.close()
-        safety_logger.close()
-        controller.deactivate(ego_vehicle)
+    finally:
+        shutdown_actions = []
+
+        if indicator_signal != OFF:
+            shutdown_actions.append((
+                "turn signals",
+                lambda: set_vehicle_indicators(ego_vehicle, OFF)
+            ))
+
+        shutdown_actions.extend([
+            ("alert manager", alert_manager.close),
+            ("safety logger", safety_logger.close),
+            (
+                "controller",
+                lambda: controller.deactivate(ego_vehicle)
+            )
+        ])
+
+        for component_name, shutdown_action in shutdown_actions:
+            try:
+                shutdown_action()
+            except Exception as error:
+                print(
+                    f"Shutdown warning ({component_name}): {error!r}",
+                    flush=True
+                )

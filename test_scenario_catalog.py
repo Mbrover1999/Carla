@@ -2,10 +2,12 @@ import unittest
 
 from scenario_catalog import (
     MAX_DURATION_MINUTES,
-    MAX_TRAFFIC_VEHICLES,
     SCENARIOS,
+    TRAFFIC_PRESETS,
     SimulationSettings,
-    get_scenario
+    get_scenario,
+    get_traffic_preset_by_count,
+    get_traffic_preset_by_display_name
 )
 
 
@@ -40,13 +42,30 @@ class ScenarioCatalogTests(unittest.TestCase):
                 traffic_vehicles=20
             ).validate()
 
-    def test_traffic_count_must_be_in_range(self):
+    def test_traffic_count_must_match_a_preset(self):
         with self.assertRaises(ValueError):
             SimulationSettings(
                 scenario_id="free_drive",
                 duration_minutes=5,
-                traffic_vehicles=MAX_TRAFFIC_VEHICLES + 1
+                traffic_vehicles=25
             ).validate()
+
+    def test_traffic_presets_have_expected_counts(self):
+        self.assertEqual(
+            [preset.vehicle_count for preset in TRAFFIC_PRESETS],
+            [0, 10, 20, 30, 40]
+        )
+
+    def test_traffic_preset_can_be_resolved_for_interface(self):
+        preset = get_traffic_preset_by_count(40)
+
+        self.assertEqual(preset.title, "Heavy Traffic")
+        self.assertEqual(
+            get_traffic_preset_by_display_name(
+                preset.display_name
+            ),
+            preset
+        )
 
     def test_unimplemented_scenario_cannot_start(self):
         with self.assertRaisesRegex(ValueError, "not implemented"):

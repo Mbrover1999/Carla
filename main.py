@@ -119,7 +119,7 @@ def main(
             data_collector = DataCollector()
             data_collector.start()
 
-        run_simulation(
+        simulation_result = run_simulation(
             world=world,
             ego_vehicle=ego_vehicle,
             controller=controller,
@@ -132,25 +132,38 @@ def main(
             )
         )
 
+        print(
+            f"SIMULATION_RESULT: {simulation_result}",
+            flush=True
+        )
+
         return 0
 
     except KeyboardInterrupt:
         print("Simulation stopped by user")
+        print("SIMULATION_RESULT: STOPPED", flush=True)
         return 0
 
     except Exception:
         print("An unexpected error occurred:")
         traceback.print_exc()
+        print("SIMULATION_RESULT: ERROR", flush=True)
         return 1
 
     finally:
-        if data_collector is not None:
-            data_collector.close()
+        try:
+            if data_collector is not None:
+                data_collector.close()
 
-        cleanup(
-            sensor_list,
-            created_vehicles
-        )
+            cleanup(
+                sensor_list,
+                created_vehicles
+            )
+        except Exception:
+            # Cleanup problems should be visible, but they must not turn a
+            # successfully completed simulation into a failed run.
+            print("Cleanup completed with a warning:")
+            traceback.print_exc()
 
 
 def parse_arguments(arguments=None):

@@ -5,10 +5,35 @@ from config import NUMBER_OF_TRAFFIC_VEHICLES
 
 MIN_DURATION_MINUTES = 1
 MAX_DURATION_MINUTES = 60
-MIN_TRAFFIC_VEHICLES = 0
-MAX_TRAFFIC_VEHICLES = 100
 DEFAULT_DURATION_MINUTES = 5
-DEFAULT_TRAFFIC_VEHICLES = NUMBER_OF_TRAFFIC_VEHICLES
+
+
+@dataclass(frozen=True)
+class TrafficPreset:
+    preset_id: str
+    title: str
+    vehicle_count: int
+
+    @property
+    def display_name(self):
+        return f"{self.title} ({self.vehicle_count} vehicles)"
+
+
+TRAFFIC_PRESETS = (
+    TrafficPreset("empty", "Empty Road", 0),
+    TrafficPreset("light", "Light Traffic", 10),
+    TrafficPreset("moderate", "Moderate Traffic", 20),
+    TrafficPreset("full", "Full Traffic", 30),
+    TrafficPreset("heavy", "Heavy Traffic", 40)
+)
+TRAFFIC_VEHICLE_COUNTS = tuple(
+    preset.vehicle_count for preset in TRAFFIC_PRESETS
+)
+DEFAULT_TRAFFIC_VEHICLES = (
+    NUMBER_OF_TRAFFIC_VEHICLES
+    if NUMBER_OF_TRAFFIC_VEHICLES in TRAFFIC_VEHICLE_COUNTS
+    else 20
+)
 
 
 @dataclass(frozen=True)
@@ -48,15 +73,13 @@ class SimulationSettings:
                 f"{MAX_DURATION_MINUTES} minutes"
             )
 
-        if not (
-            MIN_TRAFFIC_VEHICLES
-            <= self.traffic_vehicles
-            <= MAX_TRAFFIC_VEHICLES
-        ):
+        if self.traffic_vehicles not in TRAFFIC_VEHICLE_COUNTS:
             raise ValueError(
-                "Number of traffic vehicles must be between "
-                f"{MIN_TRAFFIC_VEHICLES} and "
-                f"{MAX_TRAFFIC_VEHICLES}"
+                "Traffic vehicles must use one of the available presets: "
+                + ", ".join(
+                    str(vehicle_count)
+                    for vehicle_count in TRAFFIC_VEHICLE_COUNTS
+                )
             )
 
         return self
@@ -121,3 +144,19 @@ def get_scenario(scenario_id):
             return scenario
 
     raise ValueError(f"Unknown scenario: {scenario_id}")
+
+
+def get_traffic_preset_by_count(vehicle_count):
+    for preset in TRAFFIC_PRESETS:
+        if preset.vehicle_count == vehicle_count:
+            return preset
+
+    raise ValueError(f"Unknown traffic preset count: {vehicle_count}")
+
+
+def get_traffic_preset_by_display_name(display_name):
+    for preset in TRAFFIC_PRESETS:
+        if preset.display_name == display_name:
+            return preset
+
+    raise ValueError(f"Unknown traffic preset: {display_name}")

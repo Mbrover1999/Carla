@@ -39,6 +39,9 @@ class FakeTrafficLight:
     def get_state(self):
         return self.state
 
+    def set_state(self, state):
+        self.state = SimpleNamespace(name=state)
+
     def get_transform(self):
         return SimpleNamespace(
             location=SimpleNamespace(x=10.0, y=0.0, z=0.0),
@@ -119,6 +122,51 @@ class TrafficLightSafetyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.brake, 1.0)
+
+    def test_red_hold_stays_latched_if_carla_loses_the_light(self):
+        traffic_light = FakeTrafficLight("Red", distance=2.0)
+        vehicle = FakeVehicle(traffic_light)
+        information = self.safety.inspect(vehicle)
+
+        first_result = self.safety.apply(
+            FakeControl(throttle=0.2),
+            information,
+            speed_kmh=0.5
+        )
+        vehicle.traffic_light = None
+        second_information = self.safety.inspect(vehicle)
+        second_result = self.safety.apply(
+            FakeControl(throttle=0.2),
+            second_information,
+            speed_kmh=0.2
+        )
+
+        self.assertEqual(first_result.brake, 1.0)
+        self.assertEqual(second_result.throttle, 0.0)
+        self.assertEqual(second_result.brake, 1.0)
+        self.assertEqual(
+            second_information["safety_state"],
+            self.safety.RED_BRAKING
+        )
+
+    def test_green_light_releases_latched_red_hold(self):
+        traffic_light = FakeTrafficLight("Red", distance=2.0)
+        vehicle = FakeVehicle(traffic_light)
+        information = self.safety.inspect(vehicle)
+        self.safety.apply(FakeControl(), information, speed_kmh=0.5)
+
+        traffic_light.set_state("Green")
+        vehicle.traffic_light = None
+        green_information = self.safety.inspect(vehicle)
+        requested = FakeControl(throttle=0.2)
+        result = self.safety.apply(
+            requested,
+            green_information,
+            speed_kmh=0.0
+        )
+
+        self.assertIs(result, requested)
+        self.assertFalse(self.safety.red_hold_latched)
 
     def test_distant_red_light_does_not_brake_early(self):
         vehicle = FakeVehicle(

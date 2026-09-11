@@ -1,6 +1,8 @@
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import tkinter as tk
 import uuid
 from pathlib import Path
@@ -10,11 +12,12 @@ from scenario_catalog import (
     DEFAULT_DURATION_MINUTES,
     DEFAULT_TRAFFIC_VEHICLES,
     MAX_DURATION_MINUTES,
-    MAX_TRAFFIC_VEHICLES,
     MIN_DURATION_MINUTES,
-    MIN_TRAFFIC_VEHICLES,
     SCENARIOS,
-    SimulationSettings
+    TRAFFIC_PRESETS,
+    SimulationSettings,
+    get_traffic_preset_by_count,
+    get_traffic_preset_by_display_name
 )
 
 
@@ -43,11 +46,17 @@ class CarlaInterface:
         self.selected_scenario = None
         self.simulation_process = None
         self.stop_request_path = None
+        self.console_queue = queue.Queue()
+        self.simulation_result = None
+        self.stop_was_requested = False
+        self.console_widget = None
         self.duration_value = tk.StringVar(
             value=str(DEFAULT_DURATION_MINUTES)
         )
         self.traffic_value = tk.StringVar(
-            value=str(DEFAULT_TRAFFIC_VEHICLES)
+            value=get_traffic_preset_by_count(
+                DEFAULT_TRAFFIC_VEHICLES
+            ).display_name
         )
 
         self._configure_styles()
@@ -102,6 +111,24 @@ class CarlaInterface:
             lightcolor="#31415A",
             darkcolor="#31415A",
             padding=8
+        )
+        style.configure(
+            "App.TCombobox",
+            fieldbackground=PANEL,
+            background=PANEL,
+            foreground=TEXT,
+            arrowcolor=TEXT,
+            bordercolor="#31415A",
+            lightcolor="#31415A",
+            darkcolor="#31415A",
+            padding=8
+        )
+        style.map(
+            "App.TCombobox",
+            fieldbackground=[("readonly", PANEL)],
+            foreground=[("readonly", TEXT)],
+            selectbackground=[("readonly", PANEL)],
+            selectforeground=[("readonly", TEXT)]
         )
 
     def _clear(self):
@@ -348,18 +375,9 @@ class CarlaInterface:
             maximum=MAX_DURATION_MINUTES,
             suffix="minutes"
         )
-        self._setting_row(
+        self._traffic_setting_row(
             form,
-            row=1,
-            title="Traffic vehicles",
-            detail=(
-                f"Choose {MIN_TRAFFIC_VEHICLES}-{MAX_TRAFFIC_VEHICLES} "
-                "background vehicles."
-            ),
-            variable=self.traffic_value,
-            minimum=MIN_TRAFFIC_VEHICLES,
-            maximum=MAX_TRAFFIC_VEHICLES,
-            suffix="vehicles"
+            row=1
         )
 
         self._button(
@@ -423,20 +441,62 @@ class CarlaInterface:
             color=MUTED
         ).pack(side="left", padx=(12, 0))
 
+    def _traffic_setting_row(self, parent, row):
+        label_area = tk.Frame(parent, bg=PANEL)
+        label_area.grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=16,
+            padx=(0, 40)
+        )
+        self._label(
+            label_area,
+            "Traffic density",
+            size=13,
+            bold=True,
+            anchor="w"
+        ).pack(fill="x")
+        self._label(
+            label_area,
+            "Choose one of five predefined traffic levels.",
+            size=10,
+            color=MUTED,
+            anchor="w"
+        ).pack(fill="x", pady=(5, 0))
+
+        combobox = ttk.Combobox(
+            parent,
+            textvariable=self.traffic_value,
+            values=[
+                preset.display_name
+                for preset in TRAFFIC_PRESETS
+            ],
+            state="readonly",
+            width=28,
+            justify="left",
+            style="App.TCombobox",
+            font=("Segoe UI", 11)
+        )
+        combobox.grid(row=row, column=1, sticky="e", pady=16)
+
     def _read_settings(self):
         if self.selected_scenario is None:
             raise ValueError("Select a scenario first")
 
         try:
             duration = int(self.duration_value.get())
-            traffic = int(self.traffic_value.get())
         except ValueError as error:
-            raise ValueError("Duration and traffic must be whole numbers") from error
+            raise ValueError("Duration must be a whole number") from error
+
+        traffic_preset = get_traffic_preset_by_display_name(
+            self.traffic_value.get()
+        )
 
         return SimulationSettings(
             scenario_id=self.selected_scenario.scenario_id,
             duration_minutes=duration,
-            traffic_vehicles=traffic
+            traffic_vehicles=traffic_preset.vehicle_count
         ).validate()
 
     def show_confirmation(self):
@@ -459,7 +519,12 @@ class CarlaInterface:
         values = (
             ("Scenario", self.selected_scenario.title),
             ("Duration", f"{settings.duration_minutes} minutes"),
-            ("Traffic vehicles", str(settings.traffic_vehicles))
+            (
+                "Traffic density",
+                get_traffic_preset_by_count(
+                    settings.traffic_vehicles
+                ).display_name
+            )
         )
 
         for row, (label, value) in enumerate(values):
@@ -487,12 +552,16 @@ class CarlaInterface:
         ).pack(anchor="e", pady=(26, 0))
 
     def start_simulation(self, settings):
+        self.console_queue = queue.Queue()
+        self.simulation_result = None
+        self.stop_was_requested = False
         self.stop_request_path = (
             Path(tempfile.gettempdir())
             / f"carla_stop_{uuid.uuid4().hex}.signal"
         )
         command = [
             sys.executable,
+            "-u",
             str(PROJECT_ROOT / "main.py"),
             "--scenario",
             settings.scenario_id,
@@ -507,7 +576,13 @@ class CarlaInterface:
         try:
             self.simulation_process = subprocess.Popen(
                 command,
-                cwd=str(PROJECT_ROOT)
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1
             )
         except OSError as error:
             self._remove_stop_request()
@@ -517,66 +592,229 @@ class CarlaInterface:
             )
             return
 
+        threading.Thread(
+            target=self._read_simulation_output,
+            args=(self.simulation_process,),
+            daemon=True
+        ).start()
         self.show_running(settings)
+
+    def _read_simulation_output(self, process):
+        if process.stdout is None:
+            return
+
+        try:
+            for line in process.stdout:
+                self.console_queue.put(line.rstrip("\r\n"))
+        finally:
+            process.stdout.close()
 
     def show_running(self, settings):
         page = self._page()
-        content = tk.Frame(page, bg=BACKGROUND)
-        content.place(relx=0.5, rely=0.46, anchor="center")
-
+        heading = tk.Frame(page, bg=BACKGROUND)
+        heading.pack(fill="x", pady=(0, 16))
+        heading_text = tk.Frame(heading, bg=BACKGROUND)
+        heading_text.pack(side="left", fill="x", expand=True)
         self._label(
-            content,
+            heading_text,
             "SIMULATION RUNNING",
             size=11,
             color=SUCCESS,
             bold=True
-        ).pack(pady=(0, 14))
+        ).pack(anchor="w")
         self._label(
-            content,
+            heading_text,
             self.selected_scenario.title,
-            size=28,
-            bold=True
-        ).pack()
+            size=24,
+            bold=True,
+            anchor="w"
+        ).pack(fill="x", pady=(5, 0))
         self._label(
-            content,
+            heading_text,
             (
                 f"{settings.duration_minutes} minutes  |  "
                 f"{settings.traffic_vehicles} traffic vehicles"
             ),
-            size=12,
-            color=MUTED
-        ).pack(pady=(10, 28))
+            size=10,
+            color=MUTED,
+            anchor="w"
+        ).pack(fill="x", pady=(5, 0))
+
         self.status_label = self._label(
-            content,
-            "The CARLA camera window may be opened separately.",
-            size=11,
-            color=MUTED
+            heading,
+            "Starting CARLA client...",
+            size=10,
+            color=WARNING
         )
-        self.status_label.pack(pady=(0, 24))
+        self.status_label.pack(side="right", anchor="n", pady=(8, 0))
+
+        event_panel = tk.Frame(
+            page,
+            bg=PANEL,
+            padx=22,
+            pady=14,
+            highlightthickness=1,
+            highlightbackground="#25344C"
+        )
+        event_panel.pack(fill="x", pady=(0, 16))
+        self._label(
+            event_panel,
+            "CURRENT EVENT",
+            size=9,
+            color=MUTED,
+            bold=True,
+            anchor="w"
+        ).pack(fill="x")
+        self.current_event_label = self._label(
+            event_panel,
+            "Waiting for the first simulation frame...",
+            size=14,
+            color=WARNING,
+            bold=True,
+            anchor="w"
+        )
+        self.current_event_label.pack(fill="x", pady=(5, 0))
+        self.indicator_label = self._label(
+            event_panel,
+            "Turn signal: Off",
+            size=9,
+            color=MUTED,
+            anchor="w"
+        )
+        self.indicator_label.pack(fill="x", pady=(5, 0))
+
+        console_header = tk.Frame(page, bg=BACKGROUND)
+        console_header.pack(fill="x", pady=(0, 7))
+        self._label(
+            console_header,
+            "SIMULATION CONSOLE",
+            size=10,
+            color=MUTED,
+            bold=True,
+            anchor="w"
+        ).pack(side="left")
+
+        console_panel = tk.Frame(
+            page,
+            bg="#07101D",
+            highlightthickness=1,
+            highlightbackground="#25344C"
+        )
+        console_panel.pack(fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(console_panel)
+        scrollbar.pack(side="right", fill="y")
+        self.console_widget = tk.Text(
+            console_panel,
+            bg="#07101D",
+            fg="#CCD6E5",
+            insertbackground=TEXT,
+            selectbackground="#28466F",
+            font=("Consolas", 9),
+            relief="flat",
+            borderwidth=0,
+            wrap="word",
+            padx=14,
+            pady=12,
+            state="disabled",
+            yscrollcommand=scrollbar.set
+        )
+        self.console_widget.pack(fill="both", expand=True)
+        scrollbar.configure(command=self.console_widget.yview)
+
+        self.running_actions = tk.Frame(page, bg=BACKGROUND)
+        self.running_actions.pack(fill="x", pady=(14, 0))
         self.stop_button = self._button(
-            content,
+            self.running_actions,
             "STOP SIMULATION",
             self.stop_simulation
         )
-        self.stop_button.pack()
+        self.stop_button.pack(side="right")
 
         self.root.after(500, self._poll_simulation)
+
+    def _append_console_line(self, line):
+        if self.console_widget is None:
+            return
+
+        self.console_widget.configure(state="normal")
+        self.console_widget.insert("end", line + "\n")
+        self.console_widget.see("end")
+        self.console_widget.configure(state="disabled")
+
+    def _drain_console_output(self):
+        while True:
+            try:
+                line = self.console_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            self._append_console_line(line)
+
+            if line.startswith("CURRENT_EVENT:"):
+                raw_event = line.split(":", 1)[1].strip()
+                self._show_current_event(raw_event)
+            elif line.startswith("TURN_SIGNAL:"):
+                signal = line.split(":", 1)[1].strip()
+                self.indicator_label.configure(
+                    text=f"Turn signal: {signal.title()}"
+                )
+            elif line.startswith("SIMULATION_RESULT:"):
+                self.simulation_result = line.split(":", 1)[1].strip()
+            elif line.startswith("Connected to:"):
+                self.status_label.configure(
+                    text="Connected to CARLA",
+                    fg=SUCCESS
+                )
+
+    def _show_current_event(self, raw_event):
+        if raw_event in ("CLEAR", "DISABLED"):
+            self.current_event_label.configure(
+                text="No active safety event",
+                fg=SUCCESS
+            )
+            return
+
+        event_text = raw_event.replace("_", " ").title()
+        urgent = any(
+            word in raw_event
+            for word in ("EMERGENCY", "BRAKING", "SAFE_STOP")
+        )
+        self.current_event_label.configure(
+            text=event_text,
+            fg="#F06A6A" if urgent else WARNING
+        )
 
     def _poll_simulation(self):
         if self.simulation_process is None:
             return
 
+        self._drain_console_output()
         exit_code = self.simulation_process.poll()
 
         if exit_code is None:
             self.root.after(500, self._poll_simulation)
             return
 
+        self._drain_console_output()
         self.simulation_process = None
         self._remove_stop_request()
         self.stop_button.configure(state="disabled")
 
-        if exit_code == 0:
+        if (
+            self.simulation_result == "STOPPED"
+            or self.stop_was_requested
+        ):
+            self.status_label.configure(
+                text="Simulation stopped by user.",
+                fg=WARNING
+            )
+        elif (
+            self.simulation_result == "COMPLETED"
+            or (
+                self.simulation_result is None
+                and exit_code == 0
+            )
+        ):
             self.status_label.configure(
                 text="Simulation completed successfully.",
                 fg=SUCCESS
@@ -584,22 +822,24 @@ class CarlaInterface:
         else:
             self.status_label.configure(
                 text=(
-                    "Simulation stopped with an error. Check the console "
-                    "for details."
+                    "Simulation stopped with an error. Review the console "
+                    "below."
                 ),
                 fg="#F06A6A"
             )
 
         self._button(
-            self.status_label.master,
+            self.running_actions,
             "BACK TO SCENARIOS",
             self.show_scenarios,
             primary=True
-        ).pack(pady=(14, 0))
+        ).pack(side="left")
 
     def stop_simulation(self):
         if self.simulation_process is None:
             return
+
+        self.stop_was_requested = True
 
         if self.stop_request_path is not None:
             self.stop_request_path.touch()
