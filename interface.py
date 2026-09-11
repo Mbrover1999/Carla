@@ -266,7 +266,7 @@ class CarlaInterface:
             parent,
             bg=PANEL,
             padx=24,
-            pady=20,
+            pady=13,
             highlightthickness=1,
             highlightbackground="#25344C"
         )
@@ -275,9 +275,9 @@ class CarlaInterface:
             column=column,
             sticky="nsew",
             padx=(0 if column == 0 else 9, 9 if column == 0 else 0),
-            pady=9
+            pady=7
         )
-        parent.grid_rowconfigure(row, weight=1, minsize=155)
+        parent.grid_rowconfigure(row, weight=1, minsize=148)
 
         title_row = tk.Frame(card, bg=PANEL)
         title_row.pack(fill="x")
@@ -307,15 +307,16 @@ class CarlaInterface:
             justify="left",
             anchor="nw",
             wraplength=390
-        ).pack(fill="x", pady=(12, 18))
+        ).pack(fill="x", pady=(8, 10))
 
         button = self._button(
             card,
             "SELECT" if scenario.implemented else "NOT AVAILABLE YET",
             lambda selected=scenario: self.show_settings(selected),
-            primary=scenario.implemented
+            primary=scenario.implemented,
+            width=20
         )
-        button.pack(fill="x")
+        button.pack(anchor="e", pady=(2, 0))
 
         if not scenario.implemented:
             button.configure(state="disabled", cursor="arrow")
