@@ -269,11 +269,18 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             get_actors=lambda: [],
             get_environment_objects=lambda _label: [
                 parked_environment_vehicle
-            ]
+            ],
+            get_level_bbs=lambda _label: []
         )
         fake_carla = SimpleNamespace(
             LaneType=SimpleNamespace(Any="Any"),
-            CityObjectLabel=SimpleNamespace(Vehicles="Vehicles")
+            CityObjectLabel=SimpleNamespace(
+                Car="Car",
+                Truck="Truck",
+                Bus="Bus",
+                Motorcycle="Motorcycle",
+                Bicycle="Bicycle"
+            )
         )
 
         with patch.dict(sys.modules, {"carla": fake_carla}):
@@ -288,6 +295,41 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             )
 
         self.assertEqual(control.steer, 0.0)
+        self.assertEqual(control.brake, 1.0)
+        self.assertEqual(
+            information["phase"],
+            self.controller.WAITING_FOR_RIGHT_LANE
+        )
+
+    def test_level_vehicle_bounding_box_blocks_shoulder(self):
+        current = FakeWaypoint(1, 0.0)
+        shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
+        current.right_lane = shoulder
+        parked_box = SimpleNamespace(
+            location=location(x=16.0, y=3.5),
+            extent=SimpleNamespace(x=2.3, y=1.0)
+        )
+        world = SimpleNamespace(
+            get_actors=lambda: [],
+            get_environment_objects=lambda _label: [],
+            get_level_bbs=lambda _label: [parked_box]
+        )
+        fake_carla = SimpleNamespace(
+            LaneType=SimpleNamespace(Any="Any"),
+            CityObjectLabel=SimpleNamespace(Car="Car")
+        )
+
+        with patch.dict(sys.modules, {"carla": fake_carla}):
+            control, information = self.controller.apply(
+                self.vehicle,
+                FakeControl(),
+                FakeMap(current),
+                speed_kmh=10.0,
+                inactive_seconds=5.0,
+                now=10.0,
+                world=world
+            )
+
         self.assertEqual(control.brake, 1.0)
         self.assertEqual(
             information["phase"],

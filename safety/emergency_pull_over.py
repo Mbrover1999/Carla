@@ -499,11 +499,32 @@ class EmergencyPullOverController:
             try:
                 import carla
 
-                self.environment_obstacles = list(
-                    world.get_environment_objects(
-                        carla.CityObjectLabel.Vehicles
+                vehicle_labels = [
+                    getattr(carla.CityObjectLabel, label_name)
+                    for label_name in (
+                        "Car",
+                        "Truck",
+                        "Bus",
+                        "Motorcycle",
+                        "Bicycle"
                     )
-                )
+                    if hasattr(carla.CityObjectLabel, label_name)
+                ]
+
+                for vehicle_label in vehicle_labels:
+                    try:
+                        self.environment_obstacles.extend(
+                            world.get_environment_objects(vehicle_label)
+                        )
+                    except (AttributeError, RuntimeError):
+                        pass
+
+                    try:
+                        self.environment_obstacles.extend(
+                            world.get_level_bbs(vehicle_label)
+                        )
+                    except (AttributeError, RuntimeError):
+                        pass
             except (ImportError, AttributeError, RuntimeError):
                 pass
 
@@ -547,18 +568,29 @@ class EmergencyPullOverController:
         if callable(get_location):
             return get_location()
 
+        bounding_box = getattr(obstacle, "bounding_box", None)
+
+        if bounding_box is not None:
+            box_location = getattr(bounding_box, "location", None)
+
+            if box_location is not None:
+                return box_location
+
         transform = getattr(obstacle, "transform", None)
 
         if transform is not None:
             return getattr(transform, "location", None)
 
-        bounding_box = getattr(obstacle, "bounding_box", None)
-        return getattr(bounding_box, "location", None)
+        return getattr(obstacle, "location", None)
 
     @staticmethod
     def _obstacle_radius(obstacle):
         bounding_box = getattr(obstacle, "bounding_box", None)
-        extent = getattr(bounding_box, "extent", None)
+        extent = getattr(
+            bounding_box,
+            "extent",
+            getattr(obstacle, "extent", None)
+        )
 
         if extent is None:
             return 0.8
