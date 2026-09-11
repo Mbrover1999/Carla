@@ -1,4 +1,6 @@
+import argparse
 import traceback
+from pathlib import Path
 
 from carla_client import connect_to_carla
 from cleanup import (
@@ -7,6 +9,7 @@ from cleanup import (
 )
 from config import (
     DRIVING_MODE,
+    RUN_DURATION_SECONDS,
     NUMBER_OF_TRAFFIC_VEHICLES,
     COLLECTING_DATA
 )
@@ -20,6 +23,10 @@ from sensors import (
     create_obstacle_sensor,
     create_collision_sensor,
     create_lane_invasion_sensor
+)
+from scenario_catalog import (
+    SCENARIOS,
+    SimulationSettings
 )
 from simulation import run_simulation
 from vehicles import (
@@ -42,7 +49,12 @@ def create_controller(client):
     )
 
 
-def main():
+def main(
+    run_duration_seconds=RUN_DURATION_SECONDS,
+    traffic_vehicle_count=NUMBER_OF_TRAFFIC_VEHICLES,
+    scenario_id="free_drive",
+    stop_request_file=None
+):
     camera = None
     obstacle_sensor = None
     collision_sensor = None
@@ -52,6 +64,13 @@ def main():
     data_collector = None
 
     try:
+        print(f"Starting scenario: {scenario_id}")
+        print(
+            "Simulation settings: "
+            f"duration={run_duration_seconds}s, "
+            f"traffic_vehicles={traffic_vehicle_count}"
+        )
+
         client, world = connect_to_carla()
 
         destroy_existing_vehicles(world)
@@ -61,7 +80,7 @@ def main():
 
         traffic_vehicles = spawn_traffic_vehicles(
             world,
-            NUMBER_OF_TRAFFIC_VEHICLES
+            traffic_vehicle_count
         )
 
         created_vehicles.extend(
@@ -104,15 +123,25 @@ def main():
             world=world,
             ego_vehicle=ego_vehicle,
             controller=controller,
-            data_collector=data_collector
+            data_collector=data_collector,
+            run_duration_seconds=run_duration_seconds,
+            stop_requested=(
+                lambda: stop_request_file.exists()
+                if stop_request_file is not None
+                else False
+            )
         )
+
+        return 0
 
     except KeyboardInterrupt:
         print("Simulation stopped by user")
+        return 0
 
     except Exception:
         print("An unexpected error occurred:")
         traceback.print_exc()
+        return 1
 
     finally:
         if data_collector is not None:
@@ -124,5 +153,56 @@ def main():
         )
 
 
+def parse_arguments(arguments=None):
+    parser = argparse.ArgumentParser(
+        description="Run the CARLA autonomous-driving simulation"
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=[scenario.scenario_id for scenario in SCENARIOS],
+        default="free_drive"
+    )
+    parser.add_argument(
+        "--duration-minutes",
+        type=int,
+        default=max(1, RUN_DURATION_SECONDS // 60)
+    )
+    parser.add_argument(
+        "--traffic-vehicles",
+        type=int,
+        default=NUMBER_OF_TRAFFIC_VEHICLES
+    )
+    parser.add_argument(
+        "--stop-request-file",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS
+    )
+
+    return parser.parse_args(arguments)
+
+
+def run_from_command_line(arguments=None):
+    arguments = parse_arguments(arguments)
+    settings = SimulationSettings(
+        scenario_id=arguments.scenario,
+        duration_minutes=arguments.duration_minutes,
+        traffic_vehicles=arguments.traffic_vehicles
+    )
+
+    try:
+        settings.validate()
+    except ValueError as error:
+        print(f"Invalid simulation settings: {error}")
+        return 2
+
+    return main(
+        run_duration_seconds=settings.duration_seconds,
+        traffic_vehicle_count=settings.traffic_vehicles,
+        scenario_id=settings.scenario_id,
+        stop_request_file=arguments.stop_request_file
+    )
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_from_command_line())

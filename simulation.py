@@ -621,7 +621,9 @@ def run_simulation(
     world,
     ego_vehicle,
     controller,
-    data_collector=None
+    data_collector=None,
+    run_duration_seconds=RUN_DURATION_SECONDS,
+    stop_requested=None
 ):
     controller.activate(ego_vehicle)
     safety_layer = SafetyLayer()
@@ -646,7 +648,7 @@ def run_simulation(
     safety_logger = SafetyLogger()
     safety_logger.start()
 
-    end_time = time.time() + RUN_DURATION_SECONDS
+    end_time = time.time() + run_duration_seconds
     last_processed_frame_number = None
     controller_information = None
     requested_control = None
@@ -687,7 +689,13 @@ def run_simulation(
     safety_event_key = None
 
     try:
-        while time.time() < end_time:
+        while (
+            time.time() < end_time
+            and not (
+                stop_requested is not None
+                and stop_requested()
+            )
+        ):
             world.wait_for_tick()
 
             update_spectator(
