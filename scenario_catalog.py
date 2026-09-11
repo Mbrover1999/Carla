@@ -101,7 +101,8 @@ SCENARIOS = (
         description=(
             "Demonstrate slowing, braking and emergency braking for a "
             "vehicle or obstacle ahead."
-        )
+        ),
+        implemented=True
     ),
     ScenarioDefinition(
         scenario_id="cross_traffic",

@@ -34,6 +34,15 @@ class ScenarioCatalogTests(unittest.TestCase):
 
         self.assertEqual(settings.duration_seconds, 300)
 
+    def test_obstacle_ahead_is_available(self):
+        settings = SimulationSettings(
+            scenario_id="obstacle_ahead",
+            duration_minutes=5,
+            traffic_vehicles=20
+        ).validate()
+
+        self.assertEqual(settings.scenario_id, "obstacle_ahead")
+
     def test_duration_must_be_in_range(self):
         with self.assertRaises(ValueError):
             SimulationSettings(

@@ -38,8 +38,8 @@ class CarlaInterface:
     def __init__(self, root):
         self.root = root
         self.root.title("Autonomous Driving Safety System")
-        self.root.geometry("1040x700")
-        self.root.minsize(900, 620)
+        self.root.geometry("1280x820")
+        self.root.minsize(1050, 700)
         self.root.configure(bg=BACKGROUND)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -753,6 +753,12 @@ class CarlaInterface:
             if line.startswith("CURRENT_EVENT:"):
                 raw_event = line.split(":", 1)[1].strip()
                 self._show_current_event(raw_event)
+            elif line.startswith("SCENARIO_EVENT:"):
+                scenario_event = line.split(":", 1)[1].strip()
+                self.current_event_label.configure(
+                    text=scenario_event,
+                    fg=ACCENT
+                )
             elif line.startswith("TURN_SIGNAL:"):
                 signal = line.split(":", 1)[1].strip()
                 self.indicator_label.configure(

@@ -28,6 +28,7 @@ from scenario_catalog import (
     SCENARIOS,
     SimulationSettings
 )
+from scenarios import setup_scenario
 from simulation import run_simulation
 from vehicles import (
     spawn_ego_vehicle,
@@ -77,6 +78,13 @@ def main(
 
         ego_vehicle = spawn_ego_vehicle(world)
         created_vehicles.append(ego_vehicle)
+
+        scenario_vehicles = setup_scenario(
+            scenario_id,
+            world,
+            ego_vehicle
+        )
+        created_vehicles.extend(scenario_vehicles)
 
         traffic_vehicles = spawn_traffic_vehicles(
             world,
