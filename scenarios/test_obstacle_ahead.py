@@ -74,7 +74,7 @@ class FakeWaypoint:
         self.is_junction = False
 
     def next(self, distance):
-        return [FakeWaypoint(distance)]
+        return [FakeWaypoint(self.distance + distance)]
 
 
 class FakeWorld:
@@ -97,10 +97,11 @@ class FakeWorld:
     def get_blueprint_library(self):
         return self.blueprints
 
-    def try_spawn_actor(self, _blueprint, _transform):
+    def try_spawn_actor(self, _blueprint, transform):
         if not self.can_spawn:
             return None
         self.spawned_vehicle = FakeVehicle()
+        self.spawned_vehicle.transform = transform
         return self.spawned_vehicle
 
 
@@ -119,6 +120,7 @@ class ObstacleAheadScenarioTests(unittest.TestCase):
         self.assertEqual(world.spawned_vehicle.control.brake, 1.0)
         self.assertTrue(world.spawned_vehicle.control.hand_brake)
         self.assertFalse(world.spawned_vehicle.physics_enabled)
+        self.assertEqual(world.spawned_vehicle.transform.location.x, 30.0)
 
     def test_setup_fails_if_no_spawn_point_is_available(self):
         with self.assertRaisesRegex(RuntimeError, "could not place"):

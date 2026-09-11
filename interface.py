@@ -358,7 +358,7 @@ class CarlaInterface:
         self.show_confirmation(
             SimulationSettings(
                 scenario_id=scenario.scenario_id,
-                duration_minutes=2,
+                duration_minutes=1,
                 traffic_vehicles=0
             ).validate()
         )

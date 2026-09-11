@@ -644,6 +644,7 @@ def run_simulation(
     controller,
     data_collector=None,
     run_duration_seconds=RUN_DURATION_SECONDS,
+    scenario_runtime=None,
     stop_requested=None
 ):
     controller.activate(ego_vehicle)
@@ -670,6 +671,7 @@ def run_simulation(
     safety_logger.start()
 
     end_time = time.time() + run_duration_seconds
+    simulation_start_time = time.time()
     last_processed_frame_number = None
     controller_information = None
     requested_control = None
@@ -721,6 +723,11 @@ def run_simulation(
                 break
 
             world.wait_for_tick()
+
+            if scenario_runtime is not None:
+                scenario_runtime.update(
+                    time.time() - simulation_start_time
+                )
 
             update_spectator(
                 world,

@@ -18,6 +18,7 @@ class ScenarioCatalogTests(unittest.TestCase):
             [
                 "free_drive",
                 "obstacle_ahead",
+                "lead_vehicle_emergency_brake",
                 "cross_traffic",
                 "lane_departure",
                 "red_traffic_light",
@@ -42,6 +43,18 @@ class ScenarioCatalogTests(unittest.TestCase):
         ).validate()
 
         self.assertEqual(settings.scenario_id, "obstacle_ahead")
+
+    def test_lead_vehicle_emergency_brake_is_available(self):
+        settings = SimulationSettings(
+            scenario_id="lead_vehicle_emergency_brake",
+            duration_minutes=1,
+            traffic_vehicles=0
+        ).validate()
+
+        self.assertEqual(
+            settings.scenario_id,
+            "lead_vehicle_emergency_brake"
+        )
 
     def test_duration_must_be_in_range(self):
         with self.assertRaises(ValueError):

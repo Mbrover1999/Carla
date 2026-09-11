@@ -79,12 +79,12 @@ def main(
         ego_vehicle = spawn_ego_vehicle(world)
         created_vehicles.append(ego_vehicle)
 
-        scenario_vehicles = setup_scenario(
+        scenario_runtime = setup_scenario(
             scenario_id,
             world,
             ego_vehicle
         )
-        created_vehicles.extend(scenario_vehicles)
+        created_vehicles.extend(scenario_runtime.actors)
 
         traffic_vehicles = spawn_traffic_vehicles(
             world,
@@ -133,6 +133,7 @@ def main(
             controller=controller,
             data_collector=data_collector,
             run_duration_seconds=run_duration_seconds,
+            scenario_runtime=scenario_runtime,
             stop_requested=(
                 lambda: stop_request_file.exists()
                 if stop_request_file is not None

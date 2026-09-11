@@ -1,5 +1,5 @@
 class ObstacleAheadScenario:
-    DISTANCE_CANDIDATES_METERS = (12.0, 14.0, 16.0)
+    DISTANCE_CANDIDATES_METERS = (30.0, 35.0, 40.0)
     PREFERRED_BLUEPRINTS = (
         "vehicle.lincoln.mkz_2020",
         "vehicle.audi.tt",
@@ -31,22 +31,29 @@ class ObstacleAheadScenario:
         )
 
         for distance in self.DISTANCE_CANDIDATES_METERS:
-            for waypoint in ego_waypoint.next(distance):
-                obstacle = world.try_spawn_actor(
-                    blueprint,
-                    self._spawn_transform(waypoint)
-                )
+            waypoint = self._straight_waypoint_ahead(
+                ego_waypoint,
+                distance
+            )
 
-                if obstacle is None:
-                    continue
+            if waypoint is None:
+                continue
 
-                self._hold_stationary(obstacle)
-                print(
-                    "SCENARIO_EVENT: Obstacle vehicle placed "
-                    f"{distance:.0f} m ahead",
-                    flush=True
-                )
-                return [obstacle]
+            obstacle = world.try_spawn_actor(
+                blueprint,
+                self._spawn_transform(waypoint)
+            )
+
+            if obstacle is None:
+                continue
+
+            self._hold_stationary(obstacle)
+            print(
+                "SCENARIO_EVENT: Obstacle vehicle placed "
+                f"{distance:.0f} m ahead",
+                flush=True
+            )
+            return [obstacle]
 
         raise RuntimeError(
             "Obstacle Ahead could not place a vehicle in front of the ego "
@@ -137,22 +144,12 @@ class ObstacleAheadScenario:
             ):
                 continue
 
-            candidates = waypoint.next(
+            straight_candidate = self._straight_waypoint_ahead(
+                waypoint,
                 self.DISTANCE_CANDIDATES_METERS[0]
             )
-            straight_candidates = [
-                candidate
-                for candidate in candidates
-                if (
-                    not getattr(candidate, "is_junction", False)
-                    and self._heading_difference(
-                        waypoint,
-                        candidate
-                    ) <= 8.0
-                )
-            ]
 
-            if not straight_candidates:
+            if straight_candidate is None:
                 continue
 
             ego_vehicle.set_transform(spawn_point)
@@ -171,6 +168,40 @@ class ObstacleAheadScenario:
             return waypoint
 
         return None
+
+    def _straight_waypoint_ahead(self, start_waypoint, distance):
+        """Return a waypoint only when the whole path ahead is straight."""
+        current_waypoint = start_waypoint
+        travelled = 0.0
+
+        while travelled < distance:
+            step = min(5.0, distance - travelled)
+            candidates = current_waypoint.next(step)
+            valid_candidates = [
+                candidate
+                for candidate in candidates
+                if (
+                    not getattr(candidate, "is_junction", False)
+                    and self._heading_difference(
+                        start_waypoint,
+                        candidate
+                    ) <= 8.0
+                )
+            ]
+
+            if not valid_candidates:
+                return None
+
+            current_waypoint = min(
+                valid_candidates,
+                key=lambda candidate: self._heading_difference(
+                    start_waypoint,
+                    candidate
+                )
+            )
+            travelled += step
+
+        return current_waypoint
 
     @staticmethod
     def _heading_difference(first_waypoint, second_waypoint):

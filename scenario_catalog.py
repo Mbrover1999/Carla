@@ -105,6 +105,15 @@ SCENARIOS = (
         implemented=True
     ),
     ScenarioDefinition(
+        scenario_id="lead_vehicle_emergency_brake",
+        title="Lead Vehicle Emergency Brake",
+        description=(
+            "Follow a moving vehicle that suddenly performs a full "
+            "emergency stop."
+        ),
+        implemented=True
+    ),
+    ScenarioDefinition(
         scenario_id="cross_traffic",
         title="Cross Traffic",
         description=(
