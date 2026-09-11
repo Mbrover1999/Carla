@@ -1,5 +1,5 @@
 class ObstacleAheadScenario:
-    DISTANCE_CANDIDATES_METERS = (18.0, 22.0, 26.0, 30.0)
+    DISTANCE_CANDIDATES_METERS = (12.0, 14.0, 16.0)
     PREFERRED_BLUEPRINTS = (
         "vehicle.lincoln.mkz_2020",
         "vehicle.audi.tt",
@@ -8,10 +8,18 @@ class ObstacleAheadScenario:
 
     def setup(self, world, ego_vehicle):
         world_map = world.get_map()
+        prepared_waypoint = self._prepare_demo_location(
+            world,
+            world_map,
+            ego_vehicle
+        )
         ego_waypoint = world_map.get_waypoint(
             ego_vehicle.get_location(),
             project_to_road=True
         )
+
+        if prepared_waypoint is not None:
+            ego_waypoint = prepared_waypoint
 
         if ego_waypoint is None:
             raise RuntimeError(
@@ -103,4 +111,79 @@ class ObstacleAheadScenario:
         control.steer = 0.0
         control.brake = 1.0
         control.hand_brake = True
+        vehicle.apply_control(control)
+
+        try:
+            vehicle.set_simulate_physics(False)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _prepare_demo_location(self, world, world_map, ego_vehicle):
+        try:
+            spawn_points = world_map.get_spawn_points()
+        except (AttributeError, RuntimeError):
+            return None
+
+        for spawn_point in spawn_points:
+            waypoint = world_map.get_waypoint(
+                spawn_point.location,
+                project_to_road=True
+            )
+
+            if waypoint is None or getattr(
+                waypoint,
+                "is_junction",
+                False
+            ):
+                continue
+
+            candidates = waypoint.next(
+                self.DISTANCE_CANDIDATES_METERS[0]
+            )
+            straight_candidates = [
+                candidate
+                for candidate in candidates
+                if (
+                    not getattr(candidate, "is_junction", False)
+                    and self._heading_difference(
+                        waypoint,
+                        candidate
+                    ) <= 8.0
+                )
+            ]
+
+            if not straight_candidates:
+                continue
+
+            ego_vehicle.set_transform(spawn_point)
+            self._stop_ego_vehicle(ego_vehicle)
+
+            try:
+                world.wait_for_tick()
+            except (AttributeError, RuntimeError):
+                pass
+
+            print(
+                "SCENARIO_EVENT: Ego vehicle moved to a clear straight "
+                "road",
+                flush=True
+            )
+            return waypoint
+
+        return None
+
+    @staticmethod
+    def _heading_difference(first_waypoint, second_waypoint):
+        first_yaw = first_waypoint.transform.rotation.yaw
+        second_yaw = second_waypoint.transform.rotation.yaw
+        difference = (second_yaw - first_yaw + 180.0) % 360.0 - 180.0
+        return abs(difference)
+
+    @staticmethod
+    def _stop_ego_vehicle(vehicle):
+        control = vehicle.get_control()
+        control.throttle = 0.0
+        control.steer = 0.0
+        control.brake = 1.0
+        control.hand_brake = False
         vehicle.apply_control(control)

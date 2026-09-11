@@ -339,7 +339,7 @@ class CarlaInterface:
         button = self._button(
             card,
             "SELECT" if scenario.implemented else "NOT AVAILABLE YET",
-            lambda selected=scenario: self.show_settings(selected),
+            lambda selected=scenario: self.select_scenario(selected),
             primary=scenario.implemented,
             width=20
         )
@@ -347,6 +347,21 @@ class CarlaInterface:
 
         if not scenario.implemented:
             button.configure(state="disabled", cursor="arrow")
+
+    def select_scenario(self, scenario):
+        self.selected_scenario = scenario
+
+        if scenario.scenario_id == "free_drive":
+            self.show_settings(scenario)
+            return
+
+        self.show_confirmation(
+            SimulationSettings(
+                scenario_id=scenario.scenario_id,
+                duration_minutes=2,
+                traffic_vehicles=0
+            ).validate()
+        )
 
     def show_settings(self, scenario):
         self.selected_scenario = scenario
@@ -499,33 +514,47 @@ class CarlaInterface:
             traffic_vehicles=traffic_preset.vehicle_count
         ).validate()
 
-    def show_confirmation(self):
-        try:
-            settings = self._read_settings()
-        except ValueError as error:
-            messagebox.showerror("Invalid settings", str(error))
-            return
+    def show_confirmation(self, settings=None):
+        if settings is None:
+            try:
+                settings = self._read_settings()
+            except ValueError as error:
+                messagebox.showerror("Invalid settings", str(error))
+                return
+
+        is_free_drive = settings.scenario_id == "free_drive"
 
         page = self._page()
         self._header(
             page,
             "Ready to run",
             "Make sure the CARLA server is running before continuing.",
-            lambda: self.show_settings(self.selected_scenario)
+            (
+                lambda: self.show_settings(self.selected_scenario)
+                if is_free_drive
+                else self.show_scenarios
+            )
         )
 
         summary = tk.Frame(page, bg=PANEL, padx=36, pady=30)
         summary.pack(fill="x")
-        values = (
-            ("Scenario", self.selected_scenario.title),
-            ("Duration", f"{settings.duration_minutes} minutes"),
-            (
-                "Traffic density",
-                get_traffic_preset_by_count(
-                    settings.traffic_vehicles
-                ).display_name
+        if is_free_drive:
+            values = (
+                ("Scenario", self.selected_scenario.title),
+                ("Duration", f"{settings.duration_minutes} minutes"),
+                (
+                    "Traffic density",
+                    get_traffic_preset_by_count(
+                        settings.traffic_vehicles
+                    ).display_name
+                )
             )
-        )
+        else:
+            values = (
+                ("Scenario", self.selected_scenario.title),
+                ("Mode", "Controlled demonstration"),
+                ("Environment", "Empty road, automatic setup")
+            )
 
         for row, (label, value) in enumerate(values):
             self._label(
@@ -629,12 +658,17 @@ class CarlaInterface:
             bold=True,
             anchor="w"
         ).pack(fill="x", pady=(5, 0))
-        self._label(
-            heading_text,
+        run_description = (
             (
                 f"{settings.duration_minutes} minutes  |  "
                 f"{settings.traffic_vehicles} traffic vehicles"
-            ),
+            )
+            if settings.scenario_id == "free_drive"
+            else "Controlled demonstration"
+        )
+        self._label(
+            heading_text,
+            run_description,
             size=10,
             color=MUTED,
             anchor="w"

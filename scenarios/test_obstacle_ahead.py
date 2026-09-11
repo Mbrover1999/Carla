@@ -38,6 +38,8 @@ class FakeVehicle:
             hand_brake=False
         )
         self.autopilot = None
+        self.physics_enabled = True
+        self.transform = None
 
     def get_location(self):
         return SimpleNamespace(x=0.0, y=0.0, z=0.0)
@@ -51,6 +53,12 @@ class FakeVehicle:
     def apply_control(self, control):
         self.control = control
 
+    def set_simulate_physics(self, enabled):
+        self.physics_enabled = enabled
+
+    def set_transform(self, transform):
+        self.transform = transform
+
 
 class FakeWaypoint:
     def __init__(self, distance=0.0):
@@ -60,8 +68,10 @@ class FakeWaypoint:
                 x=distance,
                 y=0.0,
                 z=0.0
-            )
+            ),
+            rotation=SimpleNamespace(yaw=0.0)
         )
+        self.is_junction = False
 
     def next(self, distance):
         return [FakeWaypoint(distance)]
@@ -73,7 +83,12 @@ class FakeWorld:
         self.spawned_vehicle = None
         self.blueprints = FakeBlueprintLibrary()
         self.world_map = SimpleNamespace(
-            get_waypoint=lambda *_args, **_kwargs: FakeWaypoint()
+            get_waypoint=lambda *_args, **_kwargs: FakeWaypoint(),
+            get_spawn_points=lambda: [
+                SimpleNamespace(
+                    location=SimpleNamespace(x=0.0, y=0.0, z=0.0)
+                )
+            ]
         )
 
     def get_map(self):
@@ -103,6 +118,7 @@ class ObstacleAheadScenarioTests(unittest.TestCase):
         self.assertEqual(world.spawned_vehicle.control.throttle, 0.0)
         self.assertEqual(world.spawned_vehicle.control.brake, 1.0)
         self.assertTrue(world.spawned_vehicle.control.hand_brake)
+        self.assertFalse(world.spawned_vehicle.physics_enabled)
 
     def test_setup_fails_if_no_spawn_point_is_available(self):
         with self.assertRaisesRegex(RuntimeError, "could not place"):
