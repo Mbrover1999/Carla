@@ -46,6 +46,8 @@ class EmergencyPullOverController:
         self.target_lane_key = None
         self.last_horn_time = None
         self.call_started = False
+        self.environment_obstacles = None
+        self.environment_world_id = None
 
     def apply(
         self,
@@ -82,7 +84,7 @@ class EmergencyPullOverController:
                 <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
                 else self.STOPPING
             )
-        elif not self._target_lane_is_clear(
+        elif not self._pull_over_path_is_clear(
             world,
             world_map,
             vehicle,
@@ -348,8 +350,39 @@ class EmergencyPullOverController:
 
         return name.upper()
 
-    @staticmethod
+    def _pull_over_path_is_clear(
+        self,
+        world,
+        world_map,
+        ego_vehicle,
+        first_target_lane
+    ):
+        target_lane = first_target_lane
+
+        for _ in range(4):
+            if not self._target_lane_is_clear(
+                world,
+                world_map,
+                ego_vehicle,
+                target_lane
+            ):
+                return False
+
+            if self._lane_type_name(target_lane) in (
+                "SHOULDER",
+                "PARKING"
+            ):
+                break
+
+            target_lane = self._valid_right_lane(target_lane)
+
+            if target_lane is None:
+                break
+
+        return True
+
     def _target_lane_is_clear(
+        self,
         world,
         world_map,
         ego_vehicle,
@@ -358,7 +391,6 @@ class EmergencyPullOverController:
         if world is None:
             return True
 
-        actors = world.get_actors()
         ego_location = ego_vehicle.get_location()
         target_road_id = getattr(target_lane, "road_id", None)
         target_lane_id = getattr(target_lane, "lane_id", None)
@@ -370,7 +402,12 @@ class EmergencyPullOverController:
         right_x = -forward_y
         right_y = forward_x
 
-        for actor in actors:
+        corridor_points = self._target_corridor_points(
+            ego_location,
+            target_lane
+        )
+
+        for actor in self._potential_obstacles(world):
             if getattr(actor, "id", None) == getattr(
                 ego_vehicle,
                 "id",
@@ -378,7 +415,7 @@ class EmergencyPullOverController:
             ):
                 continue
 
-            actor_type = getattr(actor, "type_id", "")
+            actor_type = getattr(actor, "type_id", "") or ""
 
             if actor_type and not actor_type.startswith((
                 "vehicle.",
@@ -388,9 +425,13 @@ class EmergencyPullOverController:
                 continue
 
             try:
-                actor_location = actor.get_location()
+                actor_location = self._obstacle_location(actor)
+
+                if actor_location is None:
+                    continue
+
                 actor_waypoint = (
-                    EmergencyPullOverController._map_waypoint(
+                    self._map_waypoint(
                         world_map,
                         actor_location
                     )
@@ -422,14 +463,16 @@ class EmergencyPullOverController:
                 actor_location.y - ego_location.y
             )
             inside_merge_path = (
-                EmergencyPullOverController._distance_to_segment(
+                self._distance_to_path(
                     actor_location,
-                    ego_location,
-                    target_location
+                    corridor_points
                 )
-                <= EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
+                <= (
+                    EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
+                    + self._obstacle_radius(actor)
+                )
                 and distance
-                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS
+                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS + 8.0
             )
 
             if (
@@ -444,6 +487,93 @@ class EmergencyPullOverController:
                 return False
 
         return True
+
+    def _potential_obstacles(self, world):
+        actors = list(world.get_actors())
+        world_id = id(world)
+
+        if self.environment_world_id != world_id:
+            self.environment_world_id = world_id
+            self.environment_obstacles = []
+
+            try:
+                import carla
+
+                self.environment_obstacles = list(
+                    world.get_environment_objects(
+                        carla.CityObjectLabel.Vehicles
+                    )
+                )
+            except (ImportError, AttributeError, RuntimeError):
+                pass
+
+        return actors + list(self.environment_obstacles or [])
+
+    @classmethod
+    def _target_corridor_points(cls, ego_location, target_lane):
+        points = [ego_location, target_lane.transform.location]
+        current = target_lane
+        travelled = 0.0
+
+        while travelled < EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS:
+            try:
+                candidates = list(current.next(5.0))
+            except (AttributeError, RuntimeError):
+                break
+
+            if not candidates:
+                break
+
+            current_yaw = current.transform.rotation.yaw
+            current = min(
+                candidates,
+                key=lambda candidate: abs(
+                    (
+                        candidate.transform.rotation.yaw
+                        - current_yaw
+                        + 180.0
+                    ) % 360.0 - 180.0
+                )
+            )
+            points.append(current.transform.location)
+            travelled += 5.0
+
+        return points
+
+    @staticmethod
+    def _obstacle_location(obstacle):
+        get_location = getattr(obstacle, "get_location", None)
+
+        if callable(get_location):
+            return get_location()
+
+        transform = getattr(obstacle, "transform", None)
+
+        if transform is not None:
+            return getattr(transform, "location", None)
+
+        bounding_box = getattr(obstacle, "bounding_box", None)
+        return getattr(bounding_box, "location", None)
+
+    @staticmethod
+    def _obstacle_radius(obstacle):
+        bounding_box = getattr(obstacle, "bounding_box", None)
+        extent = getattr(bounding_box, "extent", None)
+
+        if extent is None:
+            return 0.8
+
+        return min(2.5, max(float(extent.x), float(extent.y)))
+
+    @classmethod
+    def _distance_to_path(cls, point, path):
+        if len(path) < 2:
+            return float("inf")
+
+        return min(
+            cls._distance_to_segment(point, start, end)
+            for start, end in zip(path, path[1:])
+        )
 
     @staticmethod
     def _map_waypoint(world_map, location):

@@ -1,5 +1,7 @@
 import unittest
+import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from safety.emergency_pull_over import EmergencyPullOverController
 
@@ -245,6 +247,48 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
 
         self.assertEqual(control.steer, 0.0)
         self.assertGreater(control.brake, 0.0)
+        self.assertEqual(
+            information["phase"],
+            self.controller.WAITING_FOR_RIGHT_LANE
+        )
+
+    def test_static_vehicle_on_eventual_shoulder_blocks_first_lane_change(self):
+        current = FakeWaypoint(1, 0.0)
+        right_lane = FakeWaypoint(2, 3.5)
+        shoulder = FakeWaypoint(3, 7.0, lane_type="Shoulder")
+        current.right_lane = right_lane
+        right_lane.right_lane = shoulder
+        parked_environment_vehicle = SimpleNamespace(
+            id=99,
+            transform=SimpleNamespace(location=location(x=18.0, y=7.0)),
+            bounding_box=SimpleNamespace(
+                extent=SimpleNamespace(x=2.2, y=1.0)
+            )
+        )
+        world = SimpleNamespace(
+            get_actors=lambda: [],
+            get_environment_objects=lambda _label: [
+                parked_environment_vehicle
+            ]
+        )
+        fake_carla = SimpleNamespace(
+            LaneType=SimpleNamespace(Any="Any"),
+            CityObjectLabel=SimpleNamespace(Vehicles="Vehicles")
+        )
+
+        with patch.dict(sys.modules, {"carla": fake_carla}):
+            control, information = self.controller.apply(
+                self.vehicle,
+                FakeControl(),
+                FakeMap(current),
+                speed_kmh=10.0,
+                inactive_seconds=5.0,
+                now=10.0,
+                world=world
+            )
+
+        self.assertEqual(control.steer, 0.0)
+        self.assertEqual(control.brake, 1.0)
         self.assertEqual(
             information["phase"],
             self.controller.WAITING_FOR_RIGHT_LANE
