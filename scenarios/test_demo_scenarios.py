@@ -35,6 +35,15 @@ class DemoWaypoint(FakeWaypoint):
             y=self.transform.location.y - __import__("math").sin(radians) * distance
         )]
 
+    def next(self, distance):
+        yaw = self.transform.rotation.yaw
+        radians = __import__("math").radians(yaw)
+        return [DemoWaypoint(
+            yaw=yaw,
+            x=self.transform.location.x + __import__("math").cos(radians) * distance,
+            y=self.transform.location.y + __import__("math").sin(radians) * distance
+        )]
+
 
 class FakeTrafficLight:
     _next_id = 1
@@ -149,10 +158,7 @@ class DemoScenarioTests(unittest.TestCase):
             z=0.0
         )
         scenario.update(0.1)
-        self.assertEqual(
-            crossing_vehicle.control.throttle,
-            scenario.CROSSING_THROTTLE
-        )
+        self.assertGreater(crossing_vehicle.control.throttle, 0.0)
         self.assertEqual(crossing_vehicle.control.brake, 0.0)
         self.assertGreaterEqual(
             crossing_vehicle.get_velocity().y,

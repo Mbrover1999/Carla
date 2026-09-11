@@ -67,6 +67,9 @@ class FakeVehicle:
     def disable_constant_velocity(self):
         self.velocity = SimpleNamespace(x=0.0, y=0.0, z=0.0)
 
+    def set_target_velocity(self, velocity):
+        self.velocity = velocity
+
     def set_autopilot(self, enabled):
         self.autopilot = enabled
 

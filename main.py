@@ -36,6 +36,32 @@ from vehicles import (
 )
 
 
+def create_control_command_reader(command_file):
+    position = 0
+
+    def read_commands():
+        nonlocal position
+
+        if command_file is None or not command_file.exists():
+            return []
+
+        try:
+            with command_file.open("r", encoding="utf-8") as stream:
+                stream.seek(position)
+                content = stream.read()
+                position = stream.tell()
+                commands = [
+                    line.strip()
+                    for line in content.splitlines()
+                    if line.strip()
+                ]
+                return commands
+        except OSError:
+            return []
+
+    return read_commands
+
+
 def create_controller(client):
     selected_mode = DRIVING_MODE.lower().strip()
 
@@ -54,7 +80,8 @@ def main(
     run_duration_seconds=RUN_DURATION_SECONDS,
     traffic_vehicle_count=NUMBER_OF_TRAFFIC_VEHICLES,
     scenario_id="free_drive",
-    stop_request_file=None
+    stop_request_file=None,
+    control_command_file=None
 ):
     camera = None
     obstacle_sensor = None
@@ -135,6 +162,9 @@ def main(
             data_collector=data_collector,
             run_duration_seconds=run_duration_seconds,
             scenario_runtime=scenario_runtime,
+            control_command_source=create_control_command_reader(
+                control_command_file
+            ),
             stop_requested=(
                 lambda: stop_request_file.exists()
                 if stop_request_file is not None
@@ -204,6 +234,12 @@ def parse_arguments(arguments=None):
         default=None,
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--control-command-file",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS
+    )
 
     return parser.parse_args(arguments)
 
@@ -226,7 +262,8 @@ def run_from_command_line(arguments=None):
         run_duration_seconds=settings.duration_seconds,
         traffic_vehicle_count=settings.traffic_vehicles,
         scenario_id=settings.scenario_id,
-        stop_request_file=arguments.stop_request_file
+        stop_request_file=arguments.stop_request_file,
+        control_command_file=arguments.control_command_file
     )
 
 

@@ -22,6 +22,9 @@ class CrossTrafficScenario(ObstacleAheadScenario):
         self.ego_vehicle = None
         self.conflict_location = None
         self.crossing_direction = None
+        self.crossing_route = []
+        self.crossing_route_index = 0
+        self.crossing_target_speed = self.MIN_CROSSING_SPEED_MPS
 
     def setup(self, world, ego_vehicle):
         blueprint = self._select_blueprint(
@@ -43,6 +46,14 @@ class CrossTrafficScenario(ObstacleAheadScenario):
 
                 for cross_waypoint in cross_waypoints:
                     if getattr(cross_waypoint, "is_junction", False):
+                        continue
+
+                    crossing_route = self._build_crossing_route(
+                        cross_waypoint,
+                        conflict_location
+                    )
+
+                    if len(crossing_route) < 2:
                         continue
 
                     crossing_vehicle = world.try_spawn_actor(
@@ -74,6 +85,8 @@ class CrossTrafficScenario(ObstacleAheadScenario):
                     self.ego_vehicle = ego_vehicle
                     self.conflict_location = conflict_location
                     self.crossing_direction = self._direction(cross_waypoint)
+                    self.crossing_route = crossing_route
+                    self.crossing_route_index = 1
                     print(
                         "SCENARIO_EVENT: Cross Traffic demo ready; a "
                         "vehicle will enter from the side",
@@ -91,13 +104,8 @@ class CrossTrafficScenario(ObstacleAheadScenario):
 
         if not self.crossing_started and self._should_start_crossing():
             crossing_speed = self._synchronized_crossing_speed()
-            control = self.crossing_vehicle.get_control()
-            control.throttle = self.CROSSING_THROTTLE
-            control.steer = 0.0
-            control.brake = 0.0
-            control.hand_brake = False
-            self.crossing_vehicle.apply_control(control)
-            self._enable_constant_velocity(crossing_speed)
+            self.crossing_target_speed = crossing_speed
+            self._set_initial_velocity(crossing_speed)
             self.crossing_started = True
             print(
                 "SCENARIO_EVENT: Cross-traffic vehicle entered the "
@@ -110,9 +118,12 @@ class CrossTrafficScenario(ObstacleAheadScenario):
             and not self.crossing_stopped
             and self._distance_to_conflict(self.crossing_vehicle) > 8.0
         ):
-            self._enable_constant_velocity(
+            self.crossing_target_speed = (
                 self._synchronized_crossing_speed()
             )
+
+        if self.crossing_started and not self.crossing_stopped:
+            self._drive_crossing_vehicle()
 
         if (
             self.crossing_started
@@ -122,7 +133,6 @@ class CrossTrafficScenario(ObstacleAheadScenario):
             )
             and not self.crossing_stopped
         ):
-            self._disable_constant_velocity()
             self._hold_with_brake(self.crossing_vehicle)
             self.crossing_stopped = True
 
@@ -244,21 +254,107 @@ class CrossTrafficScenario(ObstacleAheadScenario):
             self.MAX_CROSSING_SPEED_MPS
         )
 
-    def _enable_constant_velocity(self, speed_mps):
+    def _set_initial_velocity(self, speed_mps):
         try:
             velocity = self.crossing_vehicle.get_velocity()
             velocity.x = self.crossing_direction[0] * speed_mps
             velocity.y = self.crossing_direction[1] * speed_mps
             velocity.z = 0.0
-            self.crossing_vehicle.enable_constant_velocity(velocity)
+            self.crossing_vehicle.set_target_velocity(velocity)
         except (AttributeError, RuntimeError):
             pass
 
-    def _disable_constant_velocity(self):
-        try:
-            self.crossing_vehicle.disable_constant_velocity()
-        except (AttributeError, RuntimeError):
-            pass
+    def _drive_crossing_vehicle(self):
+        location = self.crossing_vehicle.get_location()
+
+        while self.crossing_route_index < len(self.crossing_route) - 1:
+            target_location = self.crossing_route[
+                self.crossing_route_index
+            ].transform.location
+
+            if math.hypot(
+                target_location.x - location.x,
+                target_location.y - location.y
+            ) > 2.5:
+                break
+
+            self.crossing_route_index += 1
+
+        target_waypoint = self.crossing_route[
+            min(self.crossing_route_index, len(self.crossing_route) - 1)
+        ]
+        target_location = target_waypoint.transform.location
+        vehicle_transform = self.crossing_vehicle.get_transform()
+        desired_yaw = math.degrees(math.atan2(
+            target_location.y - location.y,
+            target_location.x - location.x
+        ))
+        heading_error = (
+            (desired_yaw - vehicle_transform.rotation.yaw + 180.0)
+            % 360.0
+        ) - 180.0
+        steer = self._clip(heading_error * 0.025, -0.35, 0.35)
+        velocity = self.crossing_vehicle.get_velocity()
+        speed = math.hypot(velocity.x, velocity.y)
+
+        if speed < self.crossing_target_speed - 0.4:
+            throttle = self.CROSSING_THROTTLE
+            brake = 0.0
+        elif speed > self.crossing_target_speed + 0.8:
+            throttle = 0.0
+            brake = 0.25
+        else:
+            throttle = 0.18
+            brake = 0.0
+
+        control = self.crossing_vehicle.get_control()
+        control.throttle = throttle
+        control.steer = steer
+        control.brake = brake
+        control.hand_brake = False
+        self.crossing_vehicle.apply_control(control)
+
+    @classmethod
+    def _build_crossing_route(cls, start_waypoint, conflict_location):
+        route = [start_waypoint]
+        current = start_waypoint
+        initial_yaw = start_waypoint.transform.rotation.yaw
+        passed_conflict = False
+
+        for _ in range(24):
+            try:
+                candidates = list(current.next(2.0))
+            except (AttributeError, RuntimeError):
+                break
+
+            if not candidates:
+                break
+
+            def score(candidate):
+                heading_error = cls._yaw_difference(
+                    initial_yaw,
+                    candidate.transform.rotation.yaw
+                )
+                distance = cls._location_distance(
+                    candidate.transform.location,
+                    conflict_location
+                )
+                return heading_error * 0.2 + (0.0 if passed_conflict else distance)
+
+            current = min(candidates, key=score)
+            route.append(current)
+            distance = cls._location_distance(
+                current.transform.location,
+                conflict_location
+            )
+
+            if distance <= 2.5:
+                passed_conflict = True
+
+            if passed_conflict and len(route) >= 12 and distance >= 14.0:
+                break
+
+        return route
 
     def _crossing_vehicle_cleared_conflict(self):
         if self._distance_to_conflict(self.crossing_vehicle) > 12.0:
@@ -320,6 +416,17 @@ class CrossTrafficScenario(ObstacleAheadScenario):
     @staticmethod
     def _clip(value, minimum, maximum):
         return max(minimum, min(value, maximum))
+
+    @staticmethod
+    def _yaw_difference(first_yaw, second_yaw):
+        return abs((second_yaw - first_yaw + 180.0) % 360.0 - 180.0)
+
+    @staticmethod
+    def _location_distance(location, target):
+        return math.hypot(
+            location.x - target[0],
+            location.y - target[1]
+        )
 
     @staticmethod
     def _heading_difference(first_waypoint, second_waypoint):

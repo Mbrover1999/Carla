@@ -645,6 +645,7 @@ def run_simulation(
     data_collector=None,
     run_duration_seconds=RUN_DURATION_SECONDS,
     scenario_runtime=None,
+    control_command_source=None,
     stop_requested=None
 ):
     controller.activate(ego_vehicle)
@@ -1273,6 +1274,11 @@ def run_simulation(
                 )
 
             pressed_key = cv2.waitKey(1) & 0xFF
+            external_commands = (
+                control_command_source()
+                if control_command_source is not None
+                else []
+            )
 
             if pressed_key in (
                 ord("q"),
@@ -1281,9 +1287,12 @@ def run_simulation(
                 termination_reason = "STOPPED"
                 break
 
-            if pressed_key in (
-                ord("i"),
-                ord("I")
+            if (
+                pressed_key in (
+                    ord("i"),
+                    ord("I")
+                )
+                or "TOGGLE_INACTIVITY" in external_commands
             ):
                 inactivity_test_active = (
                     not inactivity_test_active
@@ -1301,9 +1310,9 @@ def run_simulation(
                         "resumed."
                     )
 
-            if pressed_key in (
-                ord("l"),
-                ord("L")
+            if (
+                pressed_key in (ord("l"), ord("L"))
+                or "TOGGLE_LANE_KEEPING" in external_commands
             ):
                 lane_keeping_enabled = (
                     not lane_keeping_enabled
@@ -1318,9 +1327,9 @@ def run_simulation(
 
             if (
                 route_manager is not None
-                and pressed_key in (
-                    ord("n"),
-                    ord("N")
+                and (
+                    pressed_key in (ord("n"), ord("N"))
+                    or "NEW_ROUTE" in external_commands
                 )
             ):
                 route_manager.plan_new_route()

@@ -189,7 +189,34 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
         )
 
         self.assertEqual(control.steer, 0.0)
-        self.assertGreater(control.brake, 0.0)
+        self.assertEqual(control.brake, 1.0)
+        self.assertEqual(
+            information["phase"],
+            self.controller.WAITING_FOR_RIGHT_LANE
+        )
+
+    def test_vehicle_inside_diagonal_merge_path_blocks_turn(self):
+        current = FakeWaypoint(1, 0.0)
+        target = FakeWaypoint(2, 3.5)
+        current.right_lane = target
+        blocking_vehicle = SimpleNamespace(
+            id=2,
+            get_location=lambda: location(x=0.0, y=1.8)
+        )
+        world = SimpleNamespace(get_actors=lambda: [blocking_vehicle])
+
+        control, information = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            FakeMap(current),
+            speed_kmh=10.0,
+            inactive_seconds=5.0,
+            now=10.0,
+            world=world
+        )
+
+        self.assertEqual(control.steer, 0.0)
+        self.assertEqual(control.brake, 1.0)
         self.assertEqual(
             information["phase"],
             self.controller.WAITING_FOR_RIGHT_LANE

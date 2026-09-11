@@ -46,6 +46,8 @@ class CarlaInterface:
         self.selected_scenario = None
         self.simulation_process = None
         self.stop_request_path = None
+        self.control_request_path = None
+        self.control_buttons = []
         self.console_queue = queue.Queue()
         self.simulation_result = None
         self.stop_was_requested = False
@@ -588,6 +590,11 @@ class CarlaInterface:
             Path(tempfile.gettempdir())
             / f"carla_stop_{uuid.uuid4().hex}.signal"
         )
+        self.control_request_path = (
+            Path(tempfile.gettempdir())
+            / f"carla_controls_{uuid.uuid4().hex}.commands"
+        )
+        self.control_request_path.touch()
         command = [
             sys.executable,
             "-u",
@@ -599,7 +606,9 @@ class CarlaInterface:
             "--traffic-vehicles",
             str(settings.traffic_vehicles),
             "--stop-request-file",
-            str(self.stop_request_path)
+            str(self.stop_request_path),
+            "--control-command-file",
+            str(self.control_request_path)
         ]
 
         try:
@@ -615,6 +624,7 @@ class CarlaInterface:
             )
         except OSError as error:
             self._remove_stop_request()
+            self._remove_control_request()
             messagebox.showerror(
                 "Could not start CARLA",
                 str(error)
@@ -757,6 +767,24 @@ class CarlaInterface:
 
         self.running_actions = tk.Frame(page, bg=BACKGROUND)
         self.running_actions.pack(fill="x", pady=(14, 0))
+        self.control_buttons = []
+
+        if settings.scenario_id == "free_drive":
+            controls = (
+                ("INACTIVITY TEST", "TOGGLE_INACTIVITY"),
+                ("LANE KEEPING", "TOGGLE_LANE_KEEPING"),
+                ("NEW ROUTE", "NEW_ROUTE")
+            )
+
+            for label, command in controls:
+                button = self._button(
+                    self.running_actions,
+                    label,
+                    lambda value=command: self._send_control_command(value)
+                )
+                button.pack(side="left", padx=(0, 8))
+                self.control_buttons.append(button)
+
         self.stop_button = self._button(
             self.running_actions,
             "STOP SIMULATION",
@@ -838,7 +866,11 @@ class CarlaInterface:
         self._drain_console_output()
         self.simulation_process = None
         self._remove_stop_request()
+        self._remove_control_request()
         self.stop_button.configure(state="disabled")
+
+        for button in self.control_buttons:
+            button.configure(state="disabled")
 
         if (
             self.simulation_result == "STOPPED"
@@ -888,6 +920,24 @@ class CarlaInterface:
         self.stop_button.configure(state="disabled")
         self.root.after(5000, self._force_stop_if_needed)
 
+    def _send_control_command(self, command):
+        if (
+            self.simulation_process is None
+            or self.control_request_path is None
+        ):
+            return
+
+        try:
+            with self.control_request_path.open(
+                "a",
+                encoding="utf-8"
+            ) as stream:
+                stream.write(command + "\n")
+        except OSError as error:
+            self._append_console_line(
+                f"Could not send control command: {error}"
+            )
+
     def _force_stop_if_needed(self):
         if (
             self.simulation_process is not None
@@ -905,6 +955,17 @@ class CarlaInterface:
             pass
 
         self.stop_request_path = None
+
+    def _remove_control_request(self):
+        if self.control_request_path is None:
+            return
+
+        try:
+            self.control_request_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        self.control_request_path = None
 
     def close(self):
         if (
@@ -924,6 +985,7 @@ class CarlaInterface:
             return
 
         self._remove_stop_request()
+        self._remove_control_request()
         self.root.destroy()
 
 

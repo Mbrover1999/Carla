@@ -64,16 +64,17 @@ class EmergencyPullOverController:
             self.last_horn_time = None
             self.call_started = False
 
-        current_waypoint = world_map.get_waypoint(
-            vehicle.get_location(),
-            project_to_road=True
+        current_waypoint = self._map_waypoint(
+            world_map,
+            vehicle.get_location()
         )
         target_lane = self._target_lane(current_waypoint)
 
         if target_lane is None:
             control = self._stopping_control(
                 requested_control,
-                speed_kmh
+                speed_kmh,
+                full_stop=True
             )
             self.phase = (
                 self.STOPPED
@@ -89,7 +90,8 @@ class EmergencyPullOverController:
         ):
             control = self._stopping_control(
                 requested_control,
-                speed_kmh
+                speed_kmh,
+                full_stop=True
             )
             self.phase = self.WAITING_FOR_RIGHT_LANE
         else:
@@ -278,10 +280,17 @@ class EmergencyPullOverController:
         )
 
     @staticmethod
-    def _stopping_control(requested_control, speed_kmh):
+    def _stopping_control(
+        requested_control,
+        speed_kmh,
+        full_stop=False
+    ):
         brake = (
             1.0
-            if speed_kmh <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
+            if (
+                full_stop
+                or speed_kmh <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
+            )
             else max(requested_control.brake, EMERGENCY_PULL_OVER_BRAKE)
         )
 
@@ -350,12 +359,6 @@ class EmergencyPullOverController:
             return True
 
         actors = world.get_actors()
-        actor_filter = getattr(actors, "filter", None)
-        vehicles = (
-            actors.filter("vehicle.*")
-            if callable(actor_filter)
-            else actors
-        )
         ego_location = ego_vehicle.get_location()
         target_road_id = getattr(target_lane, "road_id", None)
         target_lane_id = getattr(target_lane, "lane_id", None)
@@ -367,7 +370,7 @@ class EmergencyPullOverController:
         right_x = -forward_y
         right_y = forward_x
 
-        for actor in vehicles:
+        for actor in actors:
             if getattr(actor, "id", None) == getattr(
                 ego_vehicle,
                 "id",
@@ -375,11 +378,22 @@ class EmergencyPullOverController:
             ):
                 continue
 
+            actor_type = getattr(actor, "type_id", "")
+
+            if actor_type and not actor_type.startswith((
+                "vehicle.",
+                "walker.",
+                "static.prop."
+            )):
+                continue
+
             try:
                 actor_location = actor.get_location()
-                actor_waypoint = world_map.get_waypoint(
-                    actor_location,
-                    project_to_road=True
+                actor_waypoint = (
+                    EmergencyPullOverController._map_waypoint(
+                        world_map,
+                        actor_location
+                    )
                 )
             except (AttributeError, RuntimeError):
                 continue
@@ -403,14 +417,24 @@ class EmergencyPullOverController:
                 <= longitudinal
                 <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS
             )
-
             distance = math.hypot(
                 actor_location.x - ego_location.x,
                 actor_location.y - ego_location.y
             )
+            inside_merge_path = (
+                EmergencyPullOverController._distance_to_segment(
+                    actor_location,
+                    ego_location,
+                    target_location
+                )
+                <= EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
+                and distance
+                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS
+            )
 
             if (
                 inside_target_corridor
+                or inside_merge_path
                 or (
                     same_target_lane
                     and distance
@@ -420,6 +444,40 @@ class EmergencyPullOverController:
                 return False
 
         return True
+
+    @staticmethod
+    def _map_waypoint(world_map, location):
+        try:
+            import carla
+
+            return world_map.get_waypoint(
+                location,
+                project_to_road=True,
+                lane_type=carla.LaneType.Any
+            )
+        except (ImportError, AttributeError, RuntimeError, TypeError):
+            return world_map.get_waypoint(
+                location,
+                project_to_road=True
+            )
+
+    @staticmethod
+    def _distance_to_segment(point, start, end):
+        segment_x = end.x - start.x
+        segment_y = end.y - start.y
+        segment_length_squared = segment_x ** 2 + segment_y ** 2
+
+        if segment_length_squared <= 0.0001:
+            return math.hypot(point.x - start.x, point.y - start.y)
+
+        projection = (
+            (point.x - start.x) * segment_x
+            + (point.y - start.y) * segment_y
+        ) / segment_length_squared
+        projection = max(0.0, min(projection, 1.0))
+        closest_x = start.x + projection * segment_x
+        closest_y = start.y + projection * segment_y
+        return math.hypot(point.x - closest_x, point.y - closest_y)
 
     @classmethod
     def _lane_key(cls, waypoint):
