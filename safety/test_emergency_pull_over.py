@@ -224,13 +224,13 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             self.controller.WAITING_FOR_RIGHT_LANE
         )
 
-    def test_vehicle_farther_ahead_in_shoulder_corridor_blocks_merge(self):
+    def test_vehicle_near_shoulder_entry_blocks_merge(self):
         current = FakeWaypoint(1, 0.0)
         shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
         current.right_lane = shoulder
         blocking_vehicle = SimpleNamespace(
             id=2,
-            get_location=lambda: location(x=22.0, y=3.5)
+            get_location=lambda: location(x=8.0, y=3.5)
         )
         world = SimpleNamespace(get_actors=lambda: [blocking_vehicle])
         world_map = FakeMap(current)
@@ -252,6 +252,32 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             self.controller.WAITING_FOR_RIGHT_LANE
         )
 
+    def test_vehicle_farther_along_shoulder_allows_safe_entry(self):
+        current = FakeWaypoint(1, 0.0)
+        shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
+        current.right_lane = shoulder
+        parked_vehicle = SimpleNamespace(
+            id=2,
+            get_location=lambda: location(x=25.0, y=3.5)
+        )
+        world = SimpleNamespace(get_actors=lambda: [parked_vehicle])
+
+        control, information = self.controller.apply(
+            self.vehicle,
+            FakeControl(),
+            FakeMap(current),
+            speed_kmh=10.0,
+            inactive_seconds=5.0,
+            now=10.0,
+            world=world
+        )
+
+        self.assertGreater(control.steer, 0.0)
+        self.assertEqual(
+            information["phase"],
+            self.controller.MOVING_TO_SHOULDER
+        )
+
     def test_static_vehicle_on_eventual_shoulder_blocks_first_lane_change(self):
         current = FakeWaypoint(1, 0.0)
         right_lane = FakeWaypoint(2, 3.5)
@@ -260,7 +286,7 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
         right_lane.right_lane = shoulder
         parked_environment_vehicle = SimpleNamespace(
             id=99,
-            transform=SimpleNamespace(location=location(x=18.0, y=7.0)),
+            transform=SimpleNamespace(location=location(x=8.0, y=7.0)),
             bounding_box=SimpleNamespace(
                 extent=SimpleNamespace(x=2.2, y=1.0)
             )
@@ -306,7 +332,7 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
         shoulder = FakeWaypoint(2, 3.5, lane_type="Shoulder")
         current.right_lane = shoulder
         parked_box = SimpleNamespace(
-            location=location(x=16.0, y=3.5),
+            location=location(x=8.0, y=3.5),
             extent=SimpleNamespace(x=2.3, y=1.0)
         )
         world = SimpleNamespace(
@@ -347,7 +373,7 @@ class EmergencyPullOverControllerTests(unittest.TestCase):
             lane_type="Parking"
         )
         current.right_lane = shoulder
-        vehicle = FakeVehicle(location(y=2.0))
+        vehicle = FakeVehicle(location(y=3.0))
 
         control, information = self.controller.apply(
             vehicle,

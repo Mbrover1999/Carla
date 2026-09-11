@@ -8,6 +8,7 @@ from config import (
     EMERGENCY_PULL_OVER_LANE_REACHED_METERS,
     EMERGENCY_PULL_OVER_LANE_CLEARANCE_METERS,
     EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS,
+    EMERGENCY_PULL_OVER_MERGE_CLEARANCE_METERS,
     EMERGENCY_PULL_OVER_REAR_CLEARANCE_METERS,
     EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS,
     EMERGENCY_PULL_OVER_LOOKAHEAD_METERS,
@@ -456,7 +457,7 @@ class EmergencyPullOverController:
                 <= EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
                 and -EMERGENCY_PULL_OVER_REAR_CLEARANCE_METERS
                 <= longitudinal
-                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS
+                <= EMERGENCY_PULL_OVER_MERGE_CLEARANCE_METERS
             )
             distance = math.hypot(
                 actor_location.x - ego_location.x,
@@ -465,14 +466,14 @@ class EmergencyPullOverController:
             inside_merge_path = (
                 self._distance_to_path(
                     actor_location,
-                    corridor_points
+                    self._merge_section(corridor_points)
                 )
                 <= (
                     EMERGENCY_PULL_OVER_CORRIDOR_HALF_WIDTH_METERS
                     + self._obstacle_radius(actor)
                 )
                 and distance
-                <= EMERGENCY_PULL_OVER_FORWARD_CLEARANCE_METERS + 8.0
+                <= EMERGENCY_PULL_OVER_MERGE_CLEARANCE_METERS + 8.0
             )
 
             if (
@@ -487,6 +488,13 @@ class EmergencyPullOverController:
                 return False
 
         return True
+
+    @staticmethod
+    def _merge_section(corridor_points):
+        # Only obstacles near the actual merge should prevent leaving the
+        # live lane. Vehicles farther along the shoulder are handled by
+        # stopping as soon as the shoulder centre is reached.
+        return corridor_points[:4]
 
     def _potential_obstacles(self, world):
         actors = list(world.get_actors())
