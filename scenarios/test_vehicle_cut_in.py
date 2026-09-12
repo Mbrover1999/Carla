@@ -56,6 +56,27 @@ class VehicleCutInScenarioTests(unittest.TestCase):
 
         self.assertIsNone(VehicleCutInScenario._left_driving_lane(ego))
 
+    def test_cut_in_waits_until_ego_is_close_and_moving(self):
+        scenario = VehicleCutInScenario()
+        scenario.ego_vehicle = SimpleNamespace(
+            get_transform=lambda: SimpleNamespace(
+                location=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                rotation=SimpleNamespace(yaw=0.0)
+            ),
+            get_velocity=lambda: SimpleNamespace(x=5.0, y=0.0, z=0.0)
+        )
+        scenario.vehicle = SimpleNamespace(
+            get_location=lambda: SimpleNamespace(x=7.0, y=-3.5, z=0.0)
+        )
+
+        self.assertTrue(scenario._ego_is_in_cut_in_position())
+
+        scenario.vehicle = SimpleNamespace(
+            get_location=lambda: SimpleNamespace(x=14.0, y=-3.5, z=0.0)
+        )
+
+        self.assertFalse(scenario._ego_is_in_cut_in_position())
+
 
 if __name__ == "__main__":
     unittest.main()

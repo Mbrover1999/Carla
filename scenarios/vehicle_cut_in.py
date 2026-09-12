@@ -12,9 +12,14 @@ class VehicleCutInScenario(ObstacleAheadScenario):
     TARGET_SPEED_MPS = 4.5
     THROTTLE = 0.48
     MAX_STEERING = 0.24
+    CUT_IN_MIN_GAP_METERS = 4.0
+    CUT_IN_MAX_GAP_METERS = 8.0
+    CUT_IN_MIN_EGO_SPEED_MPS = 3.0
 
     def __init__(self):
         self.vehicle = None
+        self.ego_vehicle = None
+        self.world_map = None
         self.route = []
         self.route_index = 0
         self.merge_announced = False
@@ -22,6 +27,8 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
     def setup(self, world, ego_vehicle):
         world_map = world.get_map()
+        self.world_map = world_map
+        self.ego_vehicle = ego_vehicle
         ego_waypoint = self._prepare_demo_location(
             world,
             world_map,
@@ -55,8 +62,10 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
         vehicle.set_autopilot(False)
         self.vehicle = vehicle
-        self.route = self._build_merge_route(left_start)
-        self.route_index = 1 if len(self.route) > 1 else 0
+        # The merge route is deliberately created later, from the cut-in
+        # vehicle's current position, once the ego vehicle has caught up.
+        self.route = []
+        self.route_index = 0
         self._set_initial_velocity(left_start)
         print(
             "SCENARIO_EVENT: Cut-in vehicle is approaching in the left lane",
@@ -65,8 +74,27 @@ class VehicleCutInScenario(ObstacleAheadScenario):
         return [vehicle]
 
     def update(self, _elapsed_seconds):
-        if self.vehicle is None or not self.route:
+        if self.vehicle is None:
             return
+
+        if not self.merge_announced:
+            if not self._ego_is_in_cut_in_position():
+                self._follow_left_lane()
+                return
+
+            current_waypoint = self._vehicle_waypoint()
+            self.route = self._build_merge_route(current_waypoint)
+
+            if len(self.route) < 3:
+                self._follow_left_lane()
+                return
+
+            self.route_index = 1
+            self.merge_announced = True
+            print(
+                "SCENARIO_EVENT: Vehicle from the left is cutting into the ego lane",
+                flush=True
+            )
 
         location = self.vehicle.get_location()
 
@@ -77,13 +105,6 @@ class VehicleCutInScenario(ObstacleAheadScenario):
                 break
 
             self.route_index += 1
-
-            if self.route_index >= 2 and not self.merge_announced:
-                self.merge_announced = True
-                print(
-                    "SCENARIO_EVENT: Vehicle from the left is cutting into the ego lane",
-                    flush=True
-                )
 
         target_waypoint = self.route[self.route_index]
         self._drive_toward(target_waypoint)
@@ -97,6 +118,50 @@ class VehicleCutInScenario(ObstacleAheadScenario):
                 "SCENARIO_EVENT: Cut-in vehicle completed the merge; safety distance is closing",
                 flush=True
             )
+
+    def _ego_is_in_cut_in_position(self):
+        if self.ego_vehicle is None:
+            return False
+
+        ego_transform = self.ego_vehicle.get_transform()
+        ego_location = ego_transform.location
+        actor_location = self.vehicle.get_location()
+        yaw = math.radians(ego_transform.rotation.yaw)
+        longitudinal_gap = (
+            (actor_location.x - ego_location.x) * math.cos(yaw)
+            + (actor_location.y - ego_location.y) * math.sin(yaw)
+        )
+        ego_velocity = self.ego_vehicle.get_velocity()
+        ego_speed = math.hypot(ego_velocity.x, ego_velocity.y)
+        return (
+            self.CUT_IN_MIN_GAP_METERS
+            <= longitudinal_gap
+            <= self.CUT_IN_MAX_GAP_METERS
+            and ego_speed >= self.CUT_IN_MIN_EGO_SPEED_MPS
+        )
+
+    def _vehicle_waypoint(self):
+        if self.world_map is None:
+            return None
+
+        try:
+            return self.world_map.get_waypoint(
+                self.vehicle.get_location(),
+                project_to_road=True
+            )
+        except (AttributeError, RuntimeError):
+            return None
+
+    def _follow_left_lane(self):
+        current_waypoint = self._vehicle_waypoint()
+
+        if current_waypoint is None:
+            return
+
+        target = self._next_straight(current_waypoint, 8.0)
+
+        if target is not None:
+            self._drive_toward(target)
 
     def _build_merge_route(self, left_start):
         route = [left_start]

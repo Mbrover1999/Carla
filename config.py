@@ -12,7 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # CARLA connection
 # =========================
 
-HOST = "localhost"
+# Use IPv4 explicitly. On some Windows configurations "localhost" resolves
+# to ::1 while the packaged CARLA RPC server listens only on IPv4.
+HOST = "127.0.0.1"
 PORT = 2000
 CLIENT_TIMEOUT = 15.0
 MAP_NAME = "Town10HD"
