@@ -66,13 +66,13 @@ class VehicleCutInScenarioTests(unittest.TestCase):
             get_velocity=lambda: SimpleNamespace(x=5.0, y=0.0, z=0.0)
         )
         scenario.vehicle = SimpleNamespace(
-            get_location=lambda: SimpleNamespace(x=7.0, y=-3.5, z=0.0)
+            get_location=lambda: SimpleNamespace(x=12.0, y=-3.5, z=0.0)
         )
 
         self.assertTrue(scenario._ego_is_in_cut_in_position())
 
         scenario.vehicle = SimpleNamespace(
-            get_location=lambda: SimpleNamespace(x=14.0, y=-3.5, z=0.0)
+            get_location=lambda: SimpleNamespace(x=18.0, y=-3.5, z=0.0)
         )
 
         self.assertFalse(scenario._ego_is_in_cut_in_position())

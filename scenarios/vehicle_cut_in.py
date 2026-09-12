@@ -7,13 +7,13 @@ class VehicleCutInScenario(ObstacleAheadScenario):
     """A controlled vehicle merges from the left into the ego lane."""
 
     DISTANCE_CANDIDATES_METERS = (65.0, 75.0, 85.0)
-    START_AHEAD_METERS = 18.0
-    ROUTE_STEP_METERS = 5.0
-    TARGET_SPEED_MPS = 4.5
-    THROTTLE = 0.48
+    START_AHEAD_METERS = 22.0
+    ROUTE_STEP_METERS = 4.0
+    TARGET_SPEED_MPS = 6.0
+    THROTTLE = 0.55
     MAX_STEERING = 0.24
-    CUT_IN_MIN_GAP_METERS = 4.0
-    CUT_IN_MAX_GAP_METERS = 8.0
+    CUT_IN_MIN_GAP_METERS = 11.0
+    CUT_IN_MAX_GAP_METERS = 14.0
     CUT_IN_MIN_EGO_SPEED_MPS = 3.0
 
     def __init__(self):
@@ -165,7 +165,9 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
     def _build_merge_route(self, left_start):
         route = [left_start]
-        left_ahead = self._next_straight(left_start, self.ROUTE_STEP_METERS)
+        # Stay in the left lane only briefly after activation, then begin
+        # crossing while there is still enough longitudinal safety margin.
+        left_ahead = self._next_straight(left_start, 2.0)
 
         if left_ahead is None:
             return route
@@ -178,7 +180,7 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
         # Aim farther down the ego lane: this makes one smooth diagonal merge
         # instead of a sharp 90-degree turn between lane centres.
-        merge_target = self._next_straight(ego_lane, 8.0) or ego_lane
+        merge_target = self._next_straight(ego_lane, 10.0) or ego_lane
         route.append(merge_target)
         current = merge_target
 
