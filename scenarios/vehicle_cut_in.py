@@ -1,14 +1,16 @@
 import math
 
 from scenarios.obstacle_ahead import ObstacleAheadScenario
+from scenarios.red_traffic_light import RedTrafficLightScenario
 
 
 class VehicleCutInScenario(ObstacleAheadScenario):
     """A controlled vehicle merges from the left into the ego lane."""
 
     DISTANCE_CANDIDATES_METERS = (65.0, 75.0, 85.0)
-    START_AHEAD_METERS = 20.0
+    START_AHEAD_METERS = 14.0
     ROUTE_STEP_METERS = 4.0
+    APPROACH_SPEED_MPS = 3.0
     TARGET_SPEED_MPS = 5.5
     THROTTLE = 0.52
     MAX_STEERING = 0.32
@@ -24,6 +26,7 @@ class VehicleCutInScenario(ObstacleAheadScenario):
         self.route_index = 0
         self.merge_announced = False
         self.completed_announced = False
+        self.controlled_traffic_lights = []
 
     def setup(self, world, ego_vehicle):
         world_map = world.get_map()
@@ -62,11 +65,12 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
         vehicle.set_autopilot(False)
         self.vehicle = vehicle
+        self._force_nearby_lights_green(world, ego_vehicle.get_location())
         # The merge route is deliberately created later, from the cut-in
         # vehicle's current position, once the ego vehicle has caught up.
         self.route = []
         self.route_index = 0
-        self._set_initial_velocity(left_start)
+        self._set_initial_velocity(left_start, self.APPROACH_SPEED_MPS)
         print(
             "SCENARIO_EVENT: Cut-in vehicle is approaching in the left lane",
             flush=True
@@ -161,7 +165,10 @@ class VehicleCutInScenario(ObstacleAheadScenario):
         target = self._next_straight(current_waypoint, 8.0)
 
         if target is not None:
-            self._drive_toward(target)
+            self._drive_toward(
+                target,
+                target_speed_mps=self.APPROACH_SPEED_MPS
+            )
 
     def _build_merge_route(self, left_start):
         route = [left_start]
@@ -192,7 +199,7 @@ class VehicleCutInScenario(ObstacleAheadScenario):
 
         return route
 
-    def _drive_toward(self, target_waypoint):
+    def _drive_toward(self, target_waypoint, target_speed_mps=None):
         transform = self.vehicle.get_transform()
         location = transform.location
         target = target_waypoint.transform.location
@@ -210,10 +217,15 @@ class VehicleCutInScenario(ObstacleAheadScenario):
         )
         velocity = self.vehicle.get_velocity()
         speed = math.hypot(velocity.x, velocity.y)
+        target_speed = (
+            self.TARGET_SPEED_MPS
+            if target_speed_mps is None
+            else target_speed_mps
+        )
 
-        if speed < self.TARGET_SPEED_MPS - 0.35:
+        if speed < target_speed - 0.35:
             throttle, brake = self.THROTTLE, 0.0
-        elif speed > self.TARGET_SPEED_MPS + 0.6:
+        elif speed > target_speed + 0.6:
             throttle, brake = 0.0, 0.22
         else:
             throttle, brake = 0.16, 0.0
@@ -225,16 +237,63 @@ class VehicleCutInScenario(ObstacleAheadScenario):
         control.hand_brake = False
         self.vehicle.apply_control(control)
 
-    def _set_initial_velocity(self, waypoint):
+    def _set_initial_velocity(self, waypoint, speed_mps):
         try:
             yaw = math.radians(waypoint.transform.rotation.yaw)
             velocity = self.vehicle.get_velocity()
-            velocity.x = math.cos(yaw) * self.TARGET_SPEED_MPS
-            velocity.y = math.sin(yaw) * self.TARGET_SPEED_MPS
+            velocity.x = math.cos(yaw) * speed_mps
+            velocity.y = math.sin(yaw) * speed_mps
             velocity.z = 0.0
             self.vehicle.set_target_velocity(velocity)
         except (AttributeError, RuntimeError):
             pass
+
+    def _force_nearby_lights_green(self, world, ego_location):
+        try:
+            actors = world.get_actors().filter("traffic.traffic_light*")
+        except (AttributeError, RuntimeError):
+            return
+
+        for light in actors:
+            try:
+                light_location = light.get_location()
+
+                if self._location_distance(ego_location, light_location) > 90.0:
+                    continue
+
+                original_state = light.get_state()
+                green_state = RedTrafficLightScenario._named_state(
+                    original_state,
+                    "Green"
+                )
+
+                if green_state is None:
+                    continue
+
+                self.controlled_traffic_lights.append((
+                    light,
+                    original_state
+                ))
+                light.set_state(green_state)
+                light.freeze(True)
+            except (AttributeError, RuntimeError):
+                continue
+
+        if self.controlled_traffic_lights:
+            print(
+                "SCENARIO_EVENT: Nearby traffic lights held green for the cut-in demo",
+                flush=True
+            )
+
+    def close(self):
+        for light, original_state in self.controlled_traffic_lights:
+            try:
+                light.freeze(False)
+                light.set_state(original_state)
+            except (AttributeError, RuntimeError):
+                pass
+
+        self.controlled_traffic_lights = []
 
     @classmethod
     def _is_demo_waypoint_suitable(cls, waypoint):
