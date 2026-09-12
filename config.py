@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 HOST = "localhost"
 PORT = 2000
-CLIENT_TIMEOUT = 5.0
+CLIENT_TIMEOUT = 15.0
 MAP_NAME = "Town10HD"
 
 

@@ -534,44 +534,53 @@ def create_blind_spot_radars(world, ego_vehicle):
     radars = []
     blueprint_library = world.get_blueprint_library()
 
-    for side, y_position, yaw in (
-        ("left", -0.85, -135.0),
-        ("right", 0.85, 135.0)
-    ):
-        blueprint = blueprint_library.find("sensor.other.radar")
-        blueprint.set_attribute("range", str(BLIND_SPOT_RADAR_RANGE))
-        blueprint.set_attribute(
-            "horizontal_fov",
-            str(BLIND_SPOT_RADAR_HORIZONTAL_FOV)
-        )
-        blueprint.set_attribute(
-            "vertical_fov",
-            str(BLIND_SPOT_RADAR_VERTICAL_FOV)
-        )
-        blueprint.set_attribute(
-            "points_per_second",
-            str(BLIND_SPOT_RADAR_POINTS_PER_SECOND)
-        )
-        blueprint.set_attribute(
-            "sensor_tick",
-            str(BLIND_SPOT_RADAR_SENSOR_TICK)
-        )
-        transform = carla.Transform(
-            carla.Location(x=-0.8, y=y_position, z=1.0),
-            carla.Rotation(yaw=yaw)
-        )
-        radar = world.spawn_actor(
-            blueprint,
-            transform,
-            attach_to=ego_vehicle,
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        radar.listen(
-            lambda measurement, radar_side=side: (
-                process_blind_spot_radar(measurement, radar_side)
+    try:
+        for side, y_position, yaw in (
+            ("left", -0.85, -135.0),
+            ("right", 0.85, 135.0)
+        ):
+            blueprint = blueprint_library.find("sensor.other.radar")
+            blueprint.set_attribute("range", str(BLIND_SPOT_RADAR_RANGE))
+            blueprint.set_attribute(
+                "horizontal_fov",
+                str(BLIND_SPOT_RADAR_HORIZONTAL_FOV)
             )
-        )
-        radars.append(radar)
+            blueprint.set_attribute(
+                "vertical_fov",
+                str(BLIND_SPOT_RADAR_VERTICAL_FOV)
+            )
+            blueprint.set_attribute(
+                "points_per_second",
+                str(BLIND_SPOT_RADAR_POINTS_PER_SECOND)
+            )
+            blueprint.set_attribute(
+                "sensor_tick",
+                str(BLIND_SPOT_RADAR_SENSOR_TICK)
+            )
+            transform = carla.Transform(
+                carla.Location(x=-0.8, y=y_position, z=1.0),
+                carla.Rotation(yaw=yaw)
+            )
+            radar = world.spawn_actor(
+                blueprint,
+                transform,
+                attach_to=ego_vehicle,
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            radar.listen(
+                lambda measurement, radar_side=side: (
+                    process_blind_spot_radar(measurement, radar_side)
+                )
+            )
+            radars.append(radar)
+    except Exception:
+        for radar in radars:
+            try:
+                radar.stop()
+                radar.destroy()
+            except (AttributeError, RuntimeError):
+                pass
+        raise
 
     print("Left and right blind-spot radars created")
     return radars

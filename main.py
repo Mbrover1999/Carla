@@ -151,11 +151,20 @@ def main(
         )
         sensor_list.append(lane_invasion_sensor)
 
-        blind_spot_radars = create_blind_spot_radars(
-            world,
-            ego_vehicle
-        )
-        sensor_list.extend(blind_spot_radars)
+        try:
+            blind_spot_radars = create_blind_spot_radars(
+                world,
+                ego_vehicle
+            )
+            sensor_list.extend(blind_spot_radars)
+        except (AttributeError, RuntimeError) as error:
+            # An unavailable radar blueprint must not prevent the rest of
+            # the simulator and its safety layers from starting.
+            print(
+                "WARNING: Blind-spot radars are unavailable; "
+                f"continuing with CARLA vehicle tracking. ({error})",
+                flush=True
+            )
 
         controller = create_controller(client)
 
