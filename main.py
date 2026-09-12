@@ -22,7 +22,8 @@ from sensors import (
     create_rgb_camera,
     create_obstacle_sensor,
     create_collision_sensor,
-    create_lane_invasion_sensor
+    create_lane_invasion_sensor,
+    create_blind_spot_radars
 )
 from scenario_catalog import (
     SCENARIOS,
@@ -87,6 +88,7 @@ def main(
     obstacle_sensor = None
     collision_sensor = None
     lane_invasion_sensor = None
+    blind_spot_radars = []
     sensor_list = []
     created_vehicles = []
     data_collector = None
@@ -149,6 +151,12 @@ def main(
         )
         sensor_list.append(lane_invasion_sensor)
 
+        blind_spot_radars = create_blind_spot_radars(
+            world,
+            ego_vehicle
+        )
+        sensor_list.extend(blind_spot_radars)
+
         controller = create_controller(client)
 
         if COLLECTING_DATA:
@@ -162,6 +170,7 @@ def main(
             data_collector=data_collector,
             run_duration_seconds=run_duration_seconds,
             scenario_runtime=scenario_runtime,
+            evaluate_journey=(scenario_id == "free_drive"),
             control_command_source=create_control_command_reader(
                 control_command_file
             ),

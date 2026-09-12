@@ -8,15 +8,16 @@ from config import PROJECT_ROOT
 
 
 class SafetyLogger:
-    def __init__(self):
+    def __init__(self, log_path=None):
         self.log_directory = (
             Path(PROJECT_ROOT)
             / "safety_logs"
         )
 
         self.log_path = (
-            self.log_directory
-            / "safety_log.csv"
+            Path(log_path)
+            if log_path is not None
+            else self.log_directory / "safety_log.csv"
         )
 
         self.csv_file = None
@@ -27,7 +28,7 @@ class SafetyLogger:
         self.collision_logged = False
 
     def start(self):
-        self.log_directory.mkdir(
+        self.log_path.parent.mkdir(
             parents=True,
             exist_ok=True
         )

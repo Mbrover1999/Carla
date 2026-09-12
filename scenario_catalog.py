@@ -115,6 +115,15 @@ SCENARIOS = (
         implemented=True
     ),
     ScenarioDefinition(
+        scenario_id="vehicle_cut_in",
+        title="Vehicle Cut-In",
+        description=(
+            "A vehicle merges from the left lane into the ego lane and "
+            "the safety system restores a safe following distance."
+        ),
+        implemented=True
+    ),
+    ScenarioDefinition(
         scenario_id="cross_traffic",
         title="Cross Traffic",
         description=(

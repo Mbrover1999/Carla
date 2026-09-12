@@ -89,6 +89,15 @@ def setup_scenario(scenario_id, world, ego_vehicle):
         scenario = LeadVehicleEmergencyBrakeScenario()
         return _runtime_for(scenario, world, ego_vehicle)
 
+    if scenario_id == "vehicle_cut_in":
+        from scenarios.vehicle_cut_in import VehicleCutInScenario
+
+        return _runtime_for(
+            VehicleCutInScenario(),
+            world,
+            ego_vehicle
+        )
+
     if scenario_id == "cross_traffic":
         from scenarios.cross_traffic import CrossTrafficScenario
 

@@ -19,6 +19,7 @@ class ScenarioCatalogTests(unittest.TestCase):
                 "free_drive",
                 "obstacle_ahead",
                 "lead_vehicle_emergency_brake",
+                "vehicle_cut_in",
                 "cross_traffic",
                 "lane_departure",
                 "red_traffic_light",

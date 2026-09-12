@@ -58,7 +58,8 @@ class EmergencyPullOverController:
         speed_kmh,
         inactive_seconds,
         now=None,
-        world=None
+        world=None,
+        blind_spot_information=None
     ):
         current_time = time.monotonic() if now is None else float(now)
 
@@ -85,11 +86,17 @@ class EmergencyPullOverController:
                 <= EMERGENCY_PULL_OVER_STOPPED_SPEED_KMH
                 else self.STOPPING
             )
-        elif not self._pull_over_path_is_clear(
-            world,
-            world_map,
-            vehicle,
-            target_lane
+        elif (
+            (
+                blind_spot_information is not None
+                and blind_spot_information.get("right_occupied", False)
+            )
+            or not self._pull_over_path_is_clear(
+                world,
+                world_map,
+                vehicle,
+                target_lane
+            )
         ):
             control = self._stopping_control(
                 requested_control,

@@ -1,5 +1,7 @@
+import json
 import math
 import time
+from datetime import datetime
 
 import carla
 import cv2
@@ -8,16 +10,19 @@ import sensors
 
 from config import (
     CONTROLLER_INACTIVITY_ENABLED,
+    BLIND_SPOT_DETECTION_ENABLED,
     CROSS_TRAFFIC_DETECTION_ENABLED,
     INTERSECTION_CONTROLLER_ENABLED,
     LANE_INVASION_ENABLED,
     LANE_KEEPING_ENABLED,
     NAVIGATION_ENABLED,
+    PROJECT_ROOT,
     ROAD_SPEED_CONTROL_ENABLED,
     RUN_DURATION_SECONDS,
     SAFETY_ENABLED,
     TRAFFIC_LIGHT_DETECTION_ENABLED
 )
+from journey_evaluator import JourneyEvaluator
 from navigation.intersection_controller import (
     IntersectionController
 )
@@ -36,6 +41,7 @@ from safety.inactivity_detector import (
     ControllerInactivityDetector
 )
 from safety.alert_manager import SafetyAlertManager
+from safety.blind_spot_safety import BlindSpotSafety
 from safety.cross_traffic_safety import CrossTrafficSafety
 from safety.emergency_pull_over import EmergencyPullOverController
 from safety.lane_keeping import LaneKeepingAssist
@@ -119,6 +125,7 @@ def draw_controller_information(
     lane_keeping_information=None,
     traffic_light_information=None,
     cross_traffic_information=None,
+    blind_spot_information=None,
     navigation_information=None,
     intersection_information=None,
     road_speed_information=None,
@@ -314,6 +321,13 @@ def draw_controller_information(
 
     lines.append(f"Cross traffic: {cross_traffic_text}")
 
+    blind_spot_state = (
+        blind_spot_information["state"]
+        if blind_spot_information is not None
+        else "DISABLED"
+    )
+    lines.append(f"Blind spot: {blind_spot_state}")
+
     if lane_keeping_information is None:
         lane_keeping_state = LaneKeepingAssist.DISABLED
     else:
@@ -461,7 +475,8 @@ def combine_safety_states(
     lane_invasion_state="CLEAR",
     lane_keeping_state="CLEAR",
     traffic_light_state="CLEAR",
-    cross_traffic_state="CLEAR"
+    cross_traffic_state="CLEAR",
+    blind_spot_intervention_state="CLEAR"
 ):
     active_states = []
 
@@ -492,6 +507,9 @@ def combine_safety_states(
     ):
         active_states.append(cross_traffic_state)
 
+    if blind_spot_intervention_state != "CLEAR":
+        active_states.append(blind_spot_intervention_state)
+
     if active_states:
         return " + ".join(active_states)
 
@@ -511,7 +529,8 @@ def get_intervention_reason(
     lane_markings=None,
     lane_keeping_state=None,
     traffic_light_state=None,
-    cross_traffic_state=None
+    cross_traffic_state=None,
+    blind_spot_intervention_state=None
 ):
     reasons = []
     urgent = False
@@ -619,6 +638,14 @@ def get_intervention_reason(
     if cross_traffic_state == CrossTrafficSafety.BRAKING:
         urgent = True
 
+    if blind_spot_intervention_state == "BLIND_SPOT_RIGHT_BLOCKED":
+        reasons.append("Vehicle in right blind spot - lane change blocked")
+        urgent = True
+
+    if blind_spot_intervention_state == "BLIND_SPOT_LEFT_BLOCKED":
+        reasons.append("Vehicle in left blind spot - lane change blocked")
+        urgent = True
+
     if not reasons:
         return None, False
 
@@ -646,6 +673,7 @@ def run_simulation(
     run_duration_seconds=RUN_DURATION_SECONDS,
     scenario_runtime=None,
     control_command_source=None,
+    evaluate_journey=False,
     stop_requested=None
 ):
     controller.activate(ego_vehicle)
@@ -656,6 +684,7 @@ def run_simulation(
     )
     traffic_light_safety = TrafficLightSafety()
     cross_traffic_safety = CrossTrafficSafety()
+    blind_spot_safety = BlindSpotSafety()
     emergency_pull_over = EmergencyPullOverController()
     route_manager = (
         RouteManager(
@@ -668,8 +697,19 @@ def run_simulation(
     intersection_controller = IntersectionController()
     road_speed_controller = RoadSpeedController()
     alert_manager = SafetyAlertManager()
-    safety_logger = SafetyLogger()
+    free_drive_log_path = None
+
+    if evaluate_journey:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        free_drive_log_path = (
+            PROJECT_ROOT
+            / "safety_logs"
+            / f"free_drive_{timestamp}.csv"
+        )
+
+    safety_logger = SafetyLogger(log_path=free_drive_log_path)
     safety_logger.start()
+    journey_evaluator = JourneyEvaluator() if evaluate_journey else None
 
     end_time = time.time() + run_duration_seconds
     simulation_start_time = time.time()
@@ -705,6 +745,8 @@ def run_simulation(
     cross_traffic_information = CrossTrafficSafety.information(
         safety_state=CrossTrafficSafety.DISABLED
     )
+    blind_spot_information = BlindSpotSafety.information()
+    blind_spot_intervention_state = "CLEAR"
     navigation_information = None
     intersection_information = (
         IntersectionController.information()
@@ -935,6 +977,17 @@ def run_simulation(
                         lane_invasion_detected
                     )
 
+                if BLIND_SPOT_DETECTION_ENABLED:
+                    blind_spot_information = blind_spot_safety.inspect(
+                        world=world,
+                        ego_vehicle=ego_vehicle,
+                        radar_readings=(
+                            sensors.get_blind_spot_radar_readings()
+                        )
+                    )
+                else:
+                    blind_spot_information = BlindSpotSafety.information()
+
                 if SAFETY_ENABLED:
                     (
                         final_control,
@@ -1078,7 +1131,8 @@ def run_simulation(
                         world_map=world.get_map(),
                         world=world,
                         speed_kmh=speed_kmh,
-                        inactive_seconds=inactivity_seconds
+                        inactive_seconds=inactivity_seconds,
+                        blind_spot_information=blind_spot_information
                     )
                 else:
                     emergency_was_active = emergency_pull_over.active
@@ -1089,6 +1143,17 @@ def run_simulation(
 
                     if emergency_was_active:
                         alert_manager.stop_current_sound()
+
+                blind_spot_intervention_state = "CLEAR"
+
+                if (
+                    emergency_information["phase"]
+                    == EmergencyPullOverController.WAITING_FOR_RIGHT_LANE
+                    and blind_spot_information["right_occupied"]
+                ):
+                    blind_spot_intervention_state = (
+                        "BLIND_SPOT_RIGHT_BLOCKED"
+                    )
 
                 requested_hazards = emergency_information[
                     "hazards_active"
@@ -1119,7 +1184,8 @@ def run_simulation(
                     lane_markings,
                     lane_keeping_information["state"],
                     traffic_light_information["safety_state"],
-                    cross_traffic_information["safety_state"]
+                    cross_traffic_information["safety_state"],
+                    blind_spot_intervention_state
                 )
 
                 traffic_light_event_key = None
@@ -1134,7 +1200,12 @@ def run_simulation(
                 safety_event_key = combine_event_keys(
                     lane_event_key,
                     traffic_light_event_key,
-                    cross_traffic_information["event_key"]
+                    cross_traffic_information["event_key"],
+                    (
+                        blind_spot_information["event_key"]
+                        if blind_spot_intervention_state != "CLEAR"
+                        else None
+                    )
                 )
 
                 alert_manager.update(
@@ -1173,7 +1244,8 @@ def run_simulation(
                     ],
                     cross_traffic_information[
                         "safety_state"
-                    ]
+                    ],
+                    blind_spot_intervention_state
                 )
 
                 if current_safety_state != last_console_event_state:
@@ -1192,6 +1264,22 @@ def run_simulation(
                     collision_actor=collision_actor,
                     event_key=safety_event_key
                 )
+
+                if journey_evaluator is not None:
+                    journey_evaluator.update(
+                        location=ego_vehicle.get_location(),
+                        speed_kmh=speed_kmh,
+                        target_speed_kmh=(
+                            road_speed_information[
+                                "target_speed_kmh"
+                            ]
+                            if road_speed_information is not None
+                            else None
+                        ),
+                        safety_state=current_safety_state,
+                        collision=collision_detected,
+                        lane_event_key=lane_event_key
+                    )
 
                 if controller_information is not None:
                     controller_information[
@@ -1253,6 +1341,9 @@ def run_simulation(
                         ),
                         cross_traffic_information=(
                             cross_traffic_information
+                        ),
+                        blind_spot_information=(
+                            blind_spot_information
                         ),
                         navigation_information=(
                             navigation_information
@@ -1334,6 +1425,21 @@ def run_simulation(
             ):
                 route_manager.plan_new_route()
                 intersection_controller.reset()
+
+        if journey_evaluator is not None:
+            journey_result = journey_evaluator.result(
+                duration_seconds=time.time() - simulation_start_time,
+                termination_reason=termination_reason
+            )
+            print(
+                "JOURNEY_RESULT: "
+                + json.dumps(journey_result, separators=(",", ":")),
+                flush=True
+            )
+            print(
+                f"FREE_DRIVE_LOG: {safety_logger.log_path.resolve()}",
+                flush=True
+            )
 
         return termination_reason
 

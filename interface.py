@@ -1,4 +1,6 @@
+import json
 import queue
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -6,7 +8,7 @@ import threading
 import tkinter as tk
 import uuid
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from scenario_catalog import (
     DEFAULT_DURATION_MINUTES,
@@ -48,6 +50,9 @@ class CarlaInterface:
         self.stop_request_path = None
         self.control_request_path = None
         self.control_buttons = []
+        self.current_settings = None
+        self.journey_result = None
+        self.free_drive_log_path = None
         self.console_queue = queue.Queue()
         self.simulation_result = None
         self.stop_was_requested = False
@@ -259,7 +264,8 @@ class CarlaInterface:
                 "This project combines an AI steering model with CARLA "
                 "navigation, traffic awareness and independent safety "
                 "layers. The system can detect obstacles, traffic lights, "
-                "cross traffic, lane departures and controller inactivity."
+                "cross traffic, blind spots, lane departures and controller "
+                "inactivity."
             ),
             size=12,
             color=MUTED,
@@ -586,6 +592,9 @@ class CarlaInterface:
         self.console_queue = queue.Queue()
         self.simulation_result = None
         self.stop_was_requested = False
+        self.current_settings = settings
+        self.journey_result = None
+        self.free_drive_log_path = None
         self.stop_request_path = (
             Path(tempfile.gettempdir())
             / f"carla_stop_{uuid.uuid4().hex}.signal"
@@ -828,6 +837,19 @@ class CarlaInterface:
                 )
             elif line.startswith("SIMULATION_RESULT:"):
                 self.simulation_result = line.split(":", 1)[1].strip()
+            elif line.startswith("JOURNEY_RESULT:"):
+                try:
+                    self.journey_result = json.loads(
+                        line.split(":", 1)[1].strip()
+                    )
+                except json.JSONDecodeError:
+                    self._append_console_line(
+                        "Could not read the journey result."
+                    )
+            elif line.startswith("FREE_DRIVE_LOG:"):
+                self.free_drive_log_path = Path(
+                    line.split(":", 1)[1].strip()
+                )
             elif line.startswith("Connected to:"):
                 self.status_label.configure(
                     text="Connected to CARLA",
@@ -872,6 +894,9 @@ class CarlaInterface:
         for button in self.control_buttons:
             button.configure(state="disabled")
 
+        if self.journey_result is not None:
+            self._show_journey_result(self.journey_result)
+
         if (
             self.simulation_result == "STOPPED"
             or self.stop_was_requested
@@ -906,6 +931,76 @@ class CarlaInterface:
             self.show_scenarios,
             primary=True
         ).pack(side="left")
+
+        if (
+            self.current_settings is not None
+            and self.current_settings.scenario_id == "free_drive"
+            and self.free_drive_log_path is not None
+        ):
+            self._button(
+                self.running_actions,
+                "SAVE LOG",
+                self.save_free_drive_log,
+                primary=True
+            ).pack(side="left", padx=(10, 0))
+
+    def _show_journey_result(self, result):
+        score = result.get("score", 0)
+        rating = result.get("rating", "Unknown")
+        score_color = (
+            SUCCESS
+            if score >= 75
+            else WARNING
+            if score >= 60
+            else "#F06A6A"
+        )
+        self.current_event_label.configure(
+            text=f"Journey score: {score}/100 — {rating}",
+            fg=score_color
+        )
+        self.indicator_label.configure(
+            text=(
+                f"Distance: {result.get('distance_km', 0):.2f} km  |  "
+                f"Average speed: "
+                f"{result.get('average_speed_kmh', 0):.1f} km/h  |  "
+                f"Collisions: {result.get('collisions', 0)}  |  "
+                f"Lane departures: {result.get('lane_departures', 0)}  |  "
+                f"Safety interventions: "
+                f"{result.get('safety_interventions', 0)}"
+            ),
+            fg=MUTED
+        )
+
+    def save_free_drive_log(self):
+        source = self.free_drive_log_path
+
+        if source is None or not source.exists():
+            messagebox.showerror(
+                "Log unavailable",
+                "The Free Drive log could not be found."
+            )
+            return
+
+        destination = filedialog.asksaveasfilename(
+            title="Save Free Drive log",
+            defaultextension=".csv",
+            initialfile=source.name,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+
+        if not destination:
+            return
+
+        try:
+            shutil.copy2(source, destination)
+        except OSError as error:
+            messagebox.showerror("Could not save log", str(error))
+            return
+
+        messagebox.showinfo(
+            "Log saved",
+            f"The Free Drive log was saved to:\n{destination}"
+        )
 
     def stop_simulation(self):
         if self.simulation_process is None:

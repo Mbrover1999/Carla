@@ -17,6 +17,13 @@ from config import (
     OBSTACLE_SENSOR_HIT_RADIUS,
     OBSTACLE_SENSOR_TICK,
 
+    BLIND_SPOT_RADAR_RANGE,
+    BLIND_SPOT_RADAR_HORIZONTAL_FOV,
+    BLIND_SPOT_RADAR_VERTICAL_FOV,
+    BLIND_SPOT_RADAR_POINTS_PER_SECOND,
+    BLIND_SPOT_RADAR_SENSOR_TICK,
+    BLIND_SPOT_READING_MAX_AGE_SECONDS,
+
     LANE_INVASION_ALERT_DURATION_SECONDS
 )
 
@@ -61,6 +68,17 @@ latest_lane_invasion_time = None
 latest_lane_invasion_frame = None
 
 lane_invasion_lock = threading.Lock()
+
+
+# =========================
+# Blind-spot radar state
+# =========================
+
+blind_spot_readings = {
+    "left": None,
+    "right": None
+}
+blind_spot_lock = threading.Lock()
 
 
 # =========================
@@ -183,6 +201,32 @@ def process_lane_invasion(event):
         )
 
 
+def process_blind_spot_radar(measurement, side):
+    """Keep the nearest radar return for each rear-side sensor."""
+    if not running or side not in blind_spot_readings:
+        return
+
+    detections = list(measurement)
+    nearest_depth = min(
+        (float(detection.depth) for detection in detections),
+        default=None
+    )
+    nearest_velocity = None
+
+    if nearest_depth is not None:
+        nearest = min(detections, key=lambda item: float(item.depth))
+        nearest_velocity = float(nearest.velocity)
+
+    with blind_spot_lock:
+        blind_spot_readings[side] = {
+            "depth_m": nearest_depth,
+            "relative_velocity_mps": nearest_velocity,
+            "detection_count": len(detections),
+            "frame": getattr(measurement, "frame", None),
+            "timestamp": time.time()
+        }
+
+
 # =========================
 # RGB getter
 # =========================
@@ -266,6 +310,24 @@ def get_latest_lane_invasion():
             list(latest_lane_markings),
             event_key
         )
+
+
+def get_blind_spot_radar_readings():
+    now = time.time()
+    result = {}
+
+    with blind_spot_lock:
+        for side, reading in blind_spot_readings.items():
+            if (
+                reading is None
+                or now - reading["timestamp"]
+                > BLIND_SPOT_READING_MAX_AGE_SECONDS
+            ):
+                result[side] = None
+            else:
+                result[side] = dict(reading)
+
+    return result
 
 
 # =========================
@@ -465,6 +527,54 @@ def create_lane_invasion_sensor(
     print("Lane invasion sensor created")
 
     return lane_invasion_sensor
+
+
+def create_blind_spot_radars(world, ego_vehicle):
+    """Attach two rear-side radars and return both sensor actors."""
+    radars = []
+    blueprint_library = world.get_blueprint_library()
+
+    for side, y_position, yaw in (
+        ("left", -0.85, -135.0),
+        ("right", 0.85, 135.0)
+    ):
+        blueprint = blueprint_library.find("sensor.other.radar")
+        blueprint.set_attribute("range", str(BLIND_SPOT_RADAR_RANGE))
+        blueprint.set_attribute(
+            "horizontal_fov",
+            str(BLIND_SPOT_RADAR_HORIZONTAL_FOV)
+        )
+        blueprint.set_attribute(
+            "vertical_fov",
+            str(BLIND_SPOT_RADAR_VERTICAL_FOV)
+        )
+        blueprint.set_attribute(
+            "points_per_second",
+            str(BLIND_SPOT_RADAR_POINTS_PER_SECOND)
+        )
+        blueprint.set_attribute(
+            "sensor_tick",
+            str(BLIND_SPOT_RADAR_SENSOR_TICK)
+        )
+        transform = carla.Transform(
+            carla.Location(x=-0.8, y=y_position, z=1.0),
+            carla.Rotation(yaw=yaw)
+        )
+        radar = world.spawn_actor(
+            blueprint,
+            transform,
+            attach_to=ego_vehicle,
+            attachment_type=carla.AttachmentType.Rigid
+        )
+        radar.listen(
+            lambda measurement, radar_side=side: (
+                process_blind_spot_radar(measurement, radar_side)
+            )
+        )
+        radars.append(radar)
+
+    print("Left and right blind-spot radars created")
+    return radars
 
 
 # =========================

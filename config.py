@@ -117,6 +117,25 @@ OBSTACLE_SENSOR_TICK = 0.05
 
 
 # =========================
+# Blind-spot radar
+# =========================
+
+BLIND_SPOT_DETECTION_ENABLED = True
+BLIND_SPOT_RADAR_RANGE = 15.0
+BLIND_SPOT_RADAR_HORIZONTAL_FOV = 70.0
+BLIND_SPOT_RADAR_VERTICAL_FOV = 14.0
+BLIND_SPOT_RADAR_POINTS_PER_SECOND = 1200
+BLIND_SPOT_RADAR_SENSOR_TICK = 0.05
+BLIND_SPOT_READING_MAX_AGE_SECONDS = 0.25
+
+# Vehicle-centred protection zone (x is forward, y is right).
+BLIND_SPOT_REAR_METERS = 10.0
+BLIND_SPOT_FORWARD_METERS = 4.0
+BLIND_SPOT_MIN_LATERAL_METERS = 1.0
+BLIND_SPOT_MAX_LATERAL_METERS = 5.5
+
+
+# =========================
 # Safety layer
 # =========================
 
