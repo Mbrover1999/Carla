@@ -136,6 +136,42 @@ class JourneyEvaluator:
         else:
             rating = "Poor"
 
+        safety_explanation = (
+            f"{self.collisions} collision(s) caused a "
+            f"{self.collisions * 40}-point penalty."
+            if self.collisions
+            else "No collisions were detected."
+        )
+
+        if self.emergency_interventions:
+            safety_explanation += (
+                f" {self.emergency_interventions} emergency intervention(s) "
+                f"deducted {self.emergency_interventions * 3} point(s)."
+            )
+        else:
+            safety_explanation += " No emergency interventions were required."
+
+        lane_explanation = (
+            "No lane departures were detected."
+            if lane_departures == 0
+            else (
+                f"{lane_departures} lane departure(s) deducted "
+                f"{lane_departures * 5} point(s)."
+            )
+        )
+        efficiency_explanation = (
+            f"The vehicle maintained {efficiency_ratio * 100.0:.1f}% of "
+            "the target road speed while no safety stop was active."
+        )
+        completion_explanation = {
+            "COMPLETED": "The full configured journey was completed.",
+            "STOPPED": "The journey was stopped by the user.",
+            "ERROR": "The journey ended because of an error."
+        }.get(
+            termination_reason,
+            f"The journey ended with status: {termination_reason}."
+        )
+
         return {
             "score": score,
             "rating": rating,
@@ -148,5 +184,17 @@ class JourneyEvaluator:
             "lane_departures": lane_departures,
             "safety_interventions": self.interventions,
             "emergency_interventions": self.emergency_interventions,
-            "termination_reason": termination_reason
+            "termination_reason": termination_reason,
+            "score_breakdown": {
+                "safety": round(safety_score, 1),
+                "lane_discipline": round(lane_score, 1),
+                "speed_efficiency": round(efficiency_score, 1),
+                "completion": round(completion_score, 1)
+            },
+            "score_explanation": [
+                safety_explanation,
+                lane_explanation,
+                efficiency_explanation,
+                completion_explanation
+            ]
         }

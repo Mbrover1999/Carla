@@ -25,23 +25,26 @@ from scenario_catalog import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-BACKGROUND = "#0B1220"
-PANEL = "#111C2E"
-PANEL_HOVER = "#182842"
-ACCENT = "#2F80ED"
-ACCENT_HOVER = "#4B94F2"
-TEXT = "#F7F9FC"
-MUTED = "#A9B5C7"
-SUCCESS = "#39B980"
-WARNING = "#E5A83B"
+BACKGROUND = "#070D18"
+PANEL = "#101B2D"
+PANEL_HOVER = "#172842"
+PANEL_RAISED = "#152238"
+ACCENT = "#3B82F6"
+ACCENT_HOVER = "#60A5FA"
+CYAN = "#22D3EE"
+TEXT = "#F8FAFC"
+MUTED = "#94A3B8"
+SUCCESS = "#34D399"
+WARNING = "#FBBF24"
+DANGER = "#FB7185"
 
 
 class CarlaInterface:
     def __init__(self, root):
         self.root = root
         self.root.title("Autonomous Driving Safety System")
-        self.root.geometry("1280x820")
-        self.root.minsize(1050, 700)
+        self.root.geometry("1360x900")
+        self.root.minsize(1120, 760)
         self.root.configure(bg=BACKGROUND)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -57,6 +60,8 @@ class CarlaInterface:
         self.simulation_result = None
         self.stop_was_requested = False
         self.console_widget = None
+        self.console_header = None
+        self.result_panel = None
         self.duration_value = tk.StringVar(
             value=str(DEFAULT_DURATION_MINUTES)
         )
@@ -80,7 +85,7 @@ class CarlaInterface:
             focusthickness=0,
             focuscolor=ACCENT,
             font=("Segoe UI", 11, "bold"),
-            padding=(24, 13)
+            padding=(28, 14)
         )
         style.map(
             "Primary.TButton",
@@ -144,8 +149,33 @@ class CarlaInterface:
 
     def _page(self):
         self._clear()
-        page = tk.Frame(self.root, bg=BACKGROUND)
-        page.pack(fill="both", expand=True, padx=58, pady=42)
+        shell = tk.Frame(self.root, bg=BACKGROUND)
+        shell.pack(fill="both", expand=True)
+        tk.Frame(shell, bg=ACCENT, height=4).pack(fill="x")
+
+        navigation = tk.Frame(shell, bg=BACKGROUND)
+        navigation.pack(fill="x", padx=58, pady=(18, 0))
+        self._label(
+            navigation,
+            "CARLA  /  SAFETY LAB",
+            size=10,
+            color=CYAN,
+            bold=True
+        ).pack(side="left")
+        self._label(
+            navigation,
+            "AUTONOMOUS DRIVING PLATFORM  •  2026",
+            size=9,
+            color=MUTED
+        ).pack(side="right")
+
+        page = tk.Frame(shell, bg=BACKGROUND)
+        page.pack(
+            fill="both",
+            expand=True,
+            padx=58,
+            pady=(20, 38)
+        )
         return page
 
     @staticmethod
@@ -206,30 +236,72 @@ class CarlaInterface:
 
     def show_welcome(self):
         page = self._page()
-        content = tk.Frame(page, bg=BACKGROUND)
+        content = tk.Frame(
+            page,
+            bg=PANEL,
+            padx=64,
+            pady=52,
+            highlightthickness=1,
+            highlightbackground="#243653"
+        )
         content.place(relx=0.5, rely=0.46, anchor="center")
+
+        tk.Frame(content, bg=CYAN, width=72, height=4).pack(pady=(0, 24))
 
         self._label(
             content,
-            "AUTONOMOUS DRIVING",
-            size=12,
-            color=ACCENT,
+            "AUTONOMOUS DRIVING SAFETY SYSTEM",
+            size=11,
+            color=CYAN,
             bold=True
         ).pack(pady=(0, 16))
         self._label(
             content,
-            "Welcome",
-            size=36,
+            "Drive intelligence.\nBuilt around safety.",
+            size=34,
             bold=True
         ).pack()
         self._label(
             content,
-            "Explore autonomous driving and its safety systems in CARLA.",
+            "Explore AI steering, navigation and independent real-time "
+            "safety layers inside CARLA.",
             size=13,
-            color=MUTED
-        ).pack(pady=(12, 34))
+            color=MUTED,
+            wraplength=690,
+            justify="center"
+        ).pack(pady=(15, 28))
 
-        actions = tk.Frame(content, bg=BACKGROUND)
+        capabilities = tk.Frame(content, bg=PANEL)
+        capabilities.pack(pady=(0, 32))
+
+        for index, (value, label) in enumerate((
+            (f"{len(SCENARIOS):02d}", "SCENARIOS"),
+            ("07", "SAFETY LAYERS"),
+            ("LIVE", "MONITORING")
+        )):
+            chip = tk.Frame(
+                capabilities,
+                bg=PANEL_RAISED,
+                padx=22,
+                pady=11
+            )
+            chip.grid(row=0, column=index, padx=5)
+            self._label(
+                chip,
+                value,
+                size=14,
+                color=SUCCESS,
+                bold=True
+            ).pack()
+            self._label(
+                chip,
+                label,
+                size=8,
+                color=MUTED,
+                bold=True
+            ).pack(pady=(2, 0))
+
+        actions = tk.Frame(content, bg=PANEL)
         actions.pack()
         self._button(
             actions,
@@ -303,7 +375,7 @@ class CarlaInterface:
             padx=24,
             pady=13,
             highlightthickness=1,
-            highlightbackground="#25344C"
+            highlightbackground="#29405F"
         )
         card.grid(
             row=row,
@@ -316,6 +388,13 @@ class CarlaInterface:
 
         title_row = tk.Frame(card, bg=PANEL)
         title_row.pack(fill="x")
+        self._label(
+            title_row,
+            f"{row * 2 + column + 1:02d}",
+            size=10,
+            color=CYAN,
+            bold=True
+        ).pack(side="left", padx=(0, 12))
         self._label(
             title_row,
             scenario.title,
@@ -353,8 +432,30 @@ class CarlaInterface:
         )
         button.pack(anchor="e", pady=(2, 0))
 
+        self._bind_card_hover(card)
+
         if not scenario.implemented:
             button.configure(state="disabled", cursor="arrow")
+
+    def _bind_card_hover(self, card):
+        def recolor(widget, color):
+            try:
+                if widget.cget("bg") in (PANEL, PANEL_HOVER):
+                    widget.configure(bg=color)
+            except (tk.TclError, TypeError):
+                pass
+
+            for child in widget.winfo_children():
+                recolor(child, color)
+
+        card.bind(
+            "<Enter>",
+            lambda _event: recolor(card, PANEL_HOVER)
+        )
+        card.bind(
+            "<Leave>",
+            lambda _event: recolor(card, PANEL)
+        )
 
     def select_scenario(self, scenario):
         self.selected_scenario = scenario
@@ -736,10 +837,19 @@ class CarlaInterface:
         )
         self.indicator_label.pack(fill="x", pady=(5, 0))
 
-        console_header = tk.Frame(page, bg=BACKGROUND)
-        console_header.pack(fill="x", pady=(0, 7))
+        self.result_panel = tk.Frame(
+            page,
+            bg=PANEL,
+            padx=24,
+            pady=18,
+            highlightthickness=1,
+            highlightbackground=ACCENT
+        )
+
+        self.console_header = tk.Frame(page, bg=BACKGROUND)
+        self.console_header.pack(fill="x", pady=(0, 7))
         self._label(
-            console_header,
+            self.console_header,
             "SIMULATION CONSOLE",
             size=10,
             color=MUTED,
@@ -952,24 +1062,136 @@ class CarlaInterface:
             if score >= 75
             else WARNING
             if score >= 60
-            else "#F06A6A"
+            else DANGER
         )
         self.current_event_label.configure(
-            text=f"Journey score: {score}/100 — {rating}",
+            text="Free Drive evaluation completed",
             fg=score_color
         )
         self.indicator_label.configure(
             text=(
-                f"Distance: {result.get('distance_km', 0):.2f} km  |  "
-                f"Average speed: "
-                f"{result.get('average_speed_kmh', 0):.1f} km/h  |  "
-                f"Collisions: {result.get('collisions', 0)}  |  "
-                f"Lane departures: {result.get('lane_departures', 0)}  |  "
-                f"Safety interventions: "
-                f"{result.get('safety_interventions', 0)}"
+                f"Distance {result.get('distance_km', 0):.2f} km  •  "
+                f"Average {result.get('average_speed_kmh', 0):.1f} km/h  •  "
+                f"Maximum {result.get('max_speed_kmh', 0):.1f} km/h"
             ),
             fg=MUTED
         )
+
+        if self.result_panel is None or self.console_header is None:
+            return
+
+        for child in self.result_panel.winfo_children():
+            child.destroy()
+
+        self.result_panel.pack(
+            fill="x",
+            pady=(0, 14),
+            before=self.console_header
+        )
+        score_area = tk.Frame(self.result_panel, bg=PANEL)
+        score_area.pack(side="left", fill="y", padx=(0, 30))
+        self._label(
+            score_area,
+            "JOURNEY SCORE",
+            size=9,
+            color=MUTED,
+            bold=True
+        ).pack(anchor="w")
+        score_line = tk.Frame(score_area, bg=PANEL)
+        score_line.pack(anchor="w", pady=(2, 0))
+        self._label(
+            score_line,
+            str(score),
+            size=38,
+            color=score_color,
+            bold=True
+        ).pack(side="left")
+        self._label(
+            score_line,
+            "/ 100",
+            size=15,
+            color=MUTED,
+            bold=True
+        ).pack(side="left", anchor="s", pady=(0, 8), padx=(5, 0))
+        self._label(
+            score_area,
+            rating.upper(),
+            size=11,
+            color=score_color,
+            bold=True
+        ).pack(anchor="w", pady=(2, 0))
+
+        details = tk.Frame(self.result_panel, bg=PANEL)
+        details.pack(side="left", fill="both", expand=True)
+        breakdown = result.get("score_breakdown", {})
+        breakdown_row = tk.Frame(details, bg=PANEL)
+        breakdown_row.pack(fill="x")
+
+        components = (
+            ("SAFETY", breakdown.get("safety", 0), 50),
+            ("LANE DISCIPLINE", breakdown.get("lane_discipline", 0), 20),
+            ("SPEED EFFICIENCY", breakdown.get("speed_efficiency", 0), 20),
+            ("COMPLETION", breakdown.get("completion", 0), 10)
+        )
+
+        for column, (label, points, maximum) in enumerate(components):
+            component = tk.Frame(
+                breakdown_row,
+                bg=PANEL_RAISED,
+                padx=14,
+                pady=9
+            )
+            component.grid(
+                row=0,
+                column=column,
+                sticky="nsew",
+                padx=(0 if column == 0 else 4, 0)
+            )
+            breakdown_row.grid_columnconfigure(column, weight=1)
+            self._label(
+                component,
+                label,
+                size=8,
+                color=MUTED,
+                bold=True
+            ).pack(anchor="w")
+            self._label(
+                component,
+                f"{points:g} / {maximum}",
+                size=13,
+                color=TEXT,
+                bold=True
+            ).pack(anchor="w", pady=(3, 0))
+            progress_track = tk.Frame(
+                component,
+                bg="#26364F",
+                height=3
+            )
+            progress_track.pack(fill="x", pady=(7, 0))
+            progress_fill = tk.Frame(
+                progress_track,
+                bg=score_color,
+                height=3
+            )
+            progress_fill.place(
+                x=0,
+                y=0,
+                relheight=1.0,
+                relwidth=max(0.0, min(float(points) / maximum, 1.0))
+            )
+
+        explanation = "  •  ".join(
+            result.get("score_explanation", [])
+        )
+        self._label(
+            details,
+            explanation or "No detailed evaluation was returned.",
+            size=9,
+            color=MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=850
+        ).pack(fill="x", pady=(11, 0))
 
     def save_free_drive_log(self):
         source = self.free_drive_log_path
