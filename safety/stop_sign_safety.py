@@ -7,6 +7,7 @@ from config import (
     STOP_SIGN_ASSUMED_DECELERATION_MPS2,
     STOP_SIGN_BRAKE_AMOUNT,
     STOP_SIGN_CREEP_MAX_SPEED_KMH,
+    STOP_SIGN_CREEP_TARGET_SPEED_KMH,
     STOP_SIGN_CREEP_THROTTLE,
     STOP_SIGN_DETECTION_RANGE_METERS,
     STOP_SIGN_HOLD_BRAKE,
@@ -163,7 +164,7 @@ class StopSignSafety:
             else None
         )
 
-    def apply(self, requested_control, information):
+    def apply(self, requested_control, information, speed_kmh):
         state = information["safety_state"]
 
         if state in (self.CLEAR, self.RELEASED, self.DISABLED):
@@ -185,9 +186,13 @@ class StopSignSafety:
 
             return self._copy_control(
                 requested_control,
-                throttle=min(
-                    requested_control.throttle,
-                    STOP_SIGN_CREEP_THROTTLE
+                throttle=(
+                    min(
+                        requested_control.throttle,
+                        STOP_SIGN_CREEP_THROTTLE
+                    )
+                    if speed_kmh < STOP_SIGN_CREEP_TARGET_SPEED_KMH
+                    else 0.0
                 ),
                 brake=0.0
             )

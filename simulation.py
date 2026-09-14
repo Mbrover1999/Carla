@@ -1190,7 +1190,8 @@ def run_simulation(
                 )
                 final_control = stop_sign_safety.apply(
                     requested_control=final_control,
-                    information=stop_sign_information
+                    information=stop_sign_information,
+                    speed_kmh=speed_kmh
                 )
 
                 if (

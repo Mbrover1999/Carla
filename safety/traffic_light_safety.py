@@ -3,6 +3,7 @@ import math
 from config import (
     TRAFFIC_LIGHT_BRAKING_TIME_SECONDS,
     TRAFFIC_LIGHT_CREEP_MAX_SPEED_KMH,
+    TRAFFIC_LIGHT_CREEP_TARGET_SPEED_KMH,
     TRAFFIC_LIGHT_CREEP_THROTTLE,
     TRAFFIC_LIGHT_HOLD_BRAKE,
     TRAFFIC_LIGHT_HOLD_SPEED_KMH,
@@ -149,9 +150,14 @@ class TrafficLightSafety:
 
             return self._copy_control(
                 requested_control,
-                throttle=min(
-                    requested_control.throttle,
-                    TRAFFIC_LIGHT_CREEP_THROTTLE
+                throttle=(
+                    min(
+                        requested_control.throttle,
+                        TRAFFIC_LIGHT_CREEP_THROTTLE
+                    )
+                    if speed_kmh
+                    < TRAFFIC_LIGHT_CREEP_TARGET_SPEED_KMH
+                    else 0.0
                 ),
                 brake=0.0
             )
