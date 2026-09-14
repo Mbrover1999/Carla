@@ -1,3 +1,5 @@
+import math
+
 from config import (
     SAFETY_MIN_SLOW_DISTANCE,
     SAFETY_MIN_BRAKE_DISTANCE,
@@ -53,7 +55,43 @@ class SafetyLayer:
         obstacle_lane = getattr(obstacle_waypoint, "lane_id", 0)
         opposite_direction = ego_lane * obstacle_lane < 0
 
-        return not (same_road and opposite_direction)
+        if same_road and opposite_direction:
+            return False
+
+        if same_road and ego_lane != obstacle_lane:
+            try:
+                ego_transform = ego_vehicle.get_transform()
+                ego_location = ego_transform.location
+                obstacle_location = obstacle_actor.get_location()
+                yaw = math.radians(ego_transform.rotation.yaw)
+                right = (-math.sin(yaw), math.cos(yaw))
+                offset_x = obstacle_location.x - ego_location.x
+                offset_y = obstacle_location.y - ego_location.y
+                lateral_distance = abs(
+                    offset_x * right[0] + offset_y * right[1]
+                )
+                ego_extent = getattr(
+                    getattr(ego_vehicle, "bounding_box", None),
+                    "extent",
+                    None
+                )
+                obstacle_extent = getattr(
+                    getattr(obstacle_actor, "bounding_box", None),
+                    "extent",
+                    None
+                )
+                combined_half_width = (
+                    float(getattr(ego_extent, "y", 0.9))
+                    + float(getattr(obstacle_extent, "y", 1.0))
+                    + 0.20
+                )
+
+                if lateral_distance > combined_half_width:
+                    return False
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+
+        return True
 
     def apply(
         self,

@@ -114,7 +114,7 @@ MAX_BRAKE = 1.0
 # =========================
 
 OBSTACLE_SENSOR_DISTANCE = 20.0
-OBSTACLE_SENSOR_HIT_RADIUS = 1.0
+OBSTACLE_SENSOR_HIT_RADIUS = 0.75
 OBSTACLE_SENSOR_TICK = 0.05
 
 
@@ -146,12 +146,17 @@ CUT_IN_DETECTION_ENABLED = True
 # Only same-direction vehicles inside this local corridor are considered.
 # A vehicle must also have a real lateral velocity toward the ego lane; this
 # prevents ordinary traffic in the neighbouring lane from causing braking.
-CUT_IN_FORWARD_RANGE_METERS = 25.0
+CUT_IN_FORWARD_RANGE_METERS = 18.0
 CUT_IN_REAR_RANGE_METERS = 4.0
 CUT_IN_TIME_HORIZON_SECONDS = 2.5
-CUT_IN_MIN_LATERAL_APPROACH_MPS = 0.40
+CUT_IN_MIN_LATERAL_APPROACH_MPS = 0.65
+CUT_IN_MIN_LANE_DEPARTURE_METERS = 0.35
+CUT_IN_DEPARTURE_CONFIRMATION_SECONDS = 0.60
+CUT_IN_MIN_PREDICTED_DEPARTURE_METERS = 1.0
 CUT_IN_CORRIDOR_MARGIN_METERS = 0.45
 CUT_IN_MIN_HEADING_ALIGNMENT = 0.60
+CUT_IN_MAX_FORWARD_GAP_SECONDS = 1.3
+CUT_IN_MIN_FORWARD_GAP_METERS = 6.0
 
 # Intervention thresholds are based on predicted time until the two vehicle
 # envelopes begin to overlap laterally.

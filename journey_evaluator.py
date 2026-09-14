@@ -42,16 +42,13 @@ class JourneyEvaluator:
         self.max_speed_kmh = max(self.max_speed_kmh, speed_kmh)
 
         normalized_state = safety_state or "CLEAR"
-        blocked_for_efficiency = any(
-            token in normalized_state
-            for token in (
-                "BRAKING",
-                "EMERGENCY",
-                "SAFE_STOP",
-                "RED_",
-                "CREEPING",
-                "STOP_SIGN"
-            )
+        # Safety actions are expected system behaviour, not inefficient
+        # driving. Measure speed efficiency only while no safety feature is
+        # intervening, so justified warnings and braking cannot reduce the
+        # score indirectly.
+        blocked_for_efficiency = normalized_state not in (
+            "CLEAR",
+            "DISABLED"
         )
 
         if (
@@ -107,7 +104,6 @@ class JourneyEvaluator:
             0.0,
             50.0
             - self.collisions * 40.0
-            - self.emergency_interventions * 3.0
         )
         lane_score = max(0.0, 20.0 - lane_departures * 5.0)
         efficiency_score = 20.0 * efficiency_ratio
@@ -147,7 +143,8 @@ class JourneyEvaluator:
         if self.emergency_interventions:
             safety_explanation += (
                 f" {self.emergency_interventions} emergency intervention(s) "
-                f"deducted {self.emergency_interventions * 3} point(s)."
+                "were recorded but did not reduce the score because they "
+                "are expected safety-system responses."
             )
         else:
             safety_explanation += " No emergency interventions were required."

@@ -5,13 +5,18 @@ from config import (
     CUT_IN_BRAKE_AMOUNT,
     CUT_IN_BRAKE_TIME_SECONDS,
     CUT_IN_CORRIDOR_MARGIN_METERS,
+    CUT_IN_DEPARTURE_CONFIRMATION_SECONDS,
     CUT_IN_EMERGENCY_BRAKE,
     CUT_IN_EMERGENCY_LONGITUDINAL_METERS,
     CUT_IN_EMERGENCY_TIME_SECONDS,
     CUT_IN_FORWARD_RANGE_METERS,
     CUT_IN_INTERVENTION_HOLD_SECONDS,
     CUT_IN_MIN_HEADING_ALIGNMENT,
+    CUT_IN_MIN_LANE_DEPARTURE_METERS,
     CUT_IN_MIN_LATERAL_APPROACH_MPS,
+    CUT_IN_MIN_PREDICTED_DEPARTURE_METERS,
+    CUT_IN_MAX_FORWARD_GAP_SECONDS,
+    CUT_IN_MIN_FORWARD_GAP_METERS,
     CUT_IN_REAR_RANGE_METERS,
     CUT_IN_TIME_HORIZON_SECONDS,
     CUT_IN_WARNING_THROTTLE
@@ -203,6 +208,12 @@ class CutInSafety:
         if actor_waypoint is None:
             return None
 
+        if (
+            getattr(ego_waypoint, "is_junction", False)
+            or getattr(actor_waypoint, "is_junction", False)
+        ):
+            return None
+
         ego_road = getattr(ego_waypoint, "road_id", None)
         actor_road = getattr(actor_waypoint, "road_id", None)
         ego_lane = getattr(ego_waypoint, "lane_id", 0)
@@ -249,6 +260,34 @@ class CutInSafety:
         if lateral_approach_speed < CUT_IN_MIN_LATERAL_APPROACH_MPS:
             return None
 
+        lane_centre = actor_waypoint.transform.location
+        lane_offset_x = actor_location.x - lane_centre.x
+        lane_offset_y = actor_location.y - lane_centre.y
+        lane_offset_toward_ego = (
+            math.copysign(1.0, ego_side_in_actor_lane)
+            * (
+                lane_offset_x * actor_lane_right[0]
+                + lane_offset_y * actor_lane_right[1]
+            )
+        )
+        predicted_lane_departure = (
+            lane_offset_toward_ego
+            + lateral_approach_speed
+            * CUT_IN_DEPARTURE_CONFIRMATION_SECONDS
+        )
+
+        # Curved-road tracking can produce a temporary lateral velocity even
+        # while the actor is centred in its own lane. A genuine cut-in must
+        # already be leaving that centre line and continue far enough toward
+        # the ego lane during the short confirmation horizon.
+        if (
+            lane_offset_toward_ego
+            < CUT_IN_MIN_LANE_DEPARTURE_METERS
+            or predicted_lane_departure
+            < CUT_IN_MIN_PREDICTED_DEPARTURE_METERS
+        ):
+            return None
+
         if self._heading_alignment(actor, forward) < (
             CUT_IN_MIN_HEADING_ALIGNMENT
         ):
@@ -285,6 +324,23 @@ class CutInSafety:
             <= predicted_longitudinal
             <= forward_overlap_limit
         ):
+            return None
+
+        forward_bumper_gap = (
+            predicted_longitudinal
+            - ego_half_length
+            - actor_half_length
+        )
+        maximum_relevant_gap = max(
+            CUT_IN_MIN_FORWARD_GAP_METERS,
+            max(0.0, ego_forward_speed)
+            * CUT_IN_MAX_FORWARD_GAP_SECONDS
+        )
+
+        # A lane change far ahead is not an immediate cut-in hazard. The
+        # normal forward obstacle layer will manage following distance after
+        # the vehicle completes its merge.
+        if forward_bumper_gap > maximum_relevant_gap:
             return None
 
         # Prefer the soonest intrusion; for equal times the closer vehicle is

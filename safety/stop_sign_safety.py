@@ -40,6 +40,7 @@ class StopSignSafety:
         self.hold_started_at = None
         self.released = False
         self.cached_stop_actors = None
+        self.cached_global_landmarks = None
 
     def inspect(
         self,
@@ -215,7 +216,7 @@ class StopSignSafety:
             landmarks = waypoint.get_landmarks_of_type(
                 STOP_SIGN_DETECTION_RANGE_METERS,
                 STOP_SIGN_LANDMARK_TYPE,
-                True
+                False
             )
         except TypeError:
             landmarks = waypoint.get_landmarks_of_type(
@@ -244,14 +245,30 @@ class StopSignSafety:
                 "distance_m": distance
             })
 
-        if candidates:
-            return min(candidates, key=lambda item: item["distance_m"])
-
-        return self._detect_actor_fallback(
+        actor_candidate = self._detect_actor_fallback(
             world=world,
             world_map=world_map,
             ego_vehicle=ego_vehicle,
             ego_waypoint=waypoint
+        )
+
+        if actor_candidate is not None:
+            candidates.append(actor_candidate)
+
+        if not candidates:
+            global_candidate = self._detect_global_landmark_fallback(
+                world_map=world_map,
+                ego_vehicle=ego_vehicle,
+                ego_waypoint=waypoint
+            )
+
+            if global_candidate is not None:
+                candidates.append(global_candidate)
+
+        return min(
+            candidates,
+            default=None,
+            key=lambda item: item["distance_m"]
         )
 
     def _detect_actor_fallback(
@@ -298,26 +315,28 @@ class StopSignSafety:
             except (AttributeError, RuntimeError):
                 continue
 
-            if sign_waypoint is None:
-                continue
-
-            if (
-                getattr(sign_waypoint, "road_id", None)
-                != getattr(ego_waypoint, "road_id", None)
-                or getattr(sign_waypoint, "lane_id", None)
-                != getattr(ego_waypoint, "lane_id", None)
+            if sign_waypoint is None or not self._same_direction(
+                ego_waypoint,
+                sign_waypoint
             ):
                 continue
 
             dx = location.x - ego_location.x
             dy = location.y - ego_location.y
             centre_distance = dx * forward[0] + dy * forward[1]
+            lateral_distance = abs(
+                dx * -forward[1] + dy * forward[0]
+            )
+            lane_width = float(getattr(ego_waypoint, "lane_width", 3.5))
             distance = self._front_bumper_distance(
                 ego_vehicle,
                 centre_distance
             )
 
-            if 0.0 <= distance <= STOP_SIGN_DETECTION_RANGE_METERS:
+            if (
+                0.0 <= distance <= STOP_SIGN_DETECTION_RANGE_METERS
+                and lateral_distance <= max(2.5, lane_width * 0.75)
+            ):
                 candidates.append({
                     "sign_id": str(getattr(actor, "id", "stop")),
                     "location": location,
@@ -329,6 +348,112 @@ class StopSignSafety:
             default=None,
             key=lambda item: item["distance_m"]
         )
+
+    def _detect_global_landmark_fallback(
+        self,
+        world_map,
+        ego_vehicle,
+        ego_waypoint
+    ):
+        if self.cached_global_landmarks is None:
+            try:
+                self.cached_global_landmarks = list(
+                    world_map.get_all_landmarks_of_type(
+                        STOP_SIGN_LANDMARK_TYPE
+                    )
+                )
+            except (AttributeError, RuntimeError, TypeError):
+                try:
+                    self.cached_global_landmarks = [
+                        landmark
+                        for landmark in world_map.get_all_landmarks()
+                        if str(getattr(landmark, "type", ""))
+                        == STOP_SIGN_LANDMARK_TYPE
+                    ]
+                except (AttributeError, RuntimeError, TypeError):
+                    self.cached_global_landmarks = []
+
+        transform = ego_vehicle.get_transform()
+        ego_location = transform.location
+        yaw = math.radians(transform.rotation.yaw)
+        forward = (math.cos(yaw), math.sin(yaw))
+        right = (-math.sin(yaw), math.cos(yaw))
+        ego_lane = getattr(ego_waypoint, "lane_id", 0)
+        lane_width = float(getattr(ego_waypoint, "lane_width", 3.5))
+        candidates = []
+
+        for landmark in self.cached_global_landmarks:
+            try:
+                location = landmark.transform.location
+            except AttributeError:
+                continue
+
+            lane_validities = getattr(landmark, "get_lane_validities", None)
+
+            if callable(lane_validities):
+                try:
+                    valid_ranges = list(lane_validities())
+                except (RuntimeError, TypeError):
+                    valid_ranges = []
+
+                if valid_ranges and not any(
+                    min(first, last) <= ego_lane <= max(first, last)
+                    for first, last in valid_ranges
+                ):
+                    continue
+
+            dx = location.x - ego_location.x
+            dy = location.y - ego_location.y
+            centre_distance = dx * forward[0] + dy * forward[1]
+            lateral_distance = abs(dx * right[0] + dy * right[1])
+            distance = self._front_bumper_distance(
+                ego_vehicle,
+                centre_distance
+            )
+
+            if (
+                0.0 <= distance <= STOP_SIGN_DETECTION_RANGE_METERS
+                and lateral_distance <= max(5.0, lane_width * 1.5)
+            ):
+                candidates.append({
+                    "sign_id": str(getattr(landmark, "id", "stop")),
+                    "location": location,
+                    "distance_m": distance
+                })
+
+        return min(
+            candidates,
+            default=None,
+            key=lambda item: item["distance_m"]
+        )
+
+    @staticmethod
+    def _same_direction(first_waypoint, second_waypoint):
+        first_lane = getattr(first_waypoint, "lane_id", 0)
+        second_lane = getattr(second_waypoint, "lane_id", 0)
+
+        if (
+            first_lane != 0
+            and second_lane != 0
+            and first_lane * second_lane < 0
+        ):
+            return False
+
+        try:
+            first_yaw = math.radians(
+                first_waypoint.transform.rotation.yaw
+            )
+            second_yaw = math.radians(
+                second_waypoint.transform.rotation.yaw
+            )
+        except AttributeError:
+            return True
+
+        alignment = (
+            math.cos(first_yaw) * math.cos(second_yaw)
+            + math.sin(first_yaw) * math.sin(second_yaw)
+        )
+        return alignment >= 0.5
 
     def _current_distance(self, ego_vehicle, detection):
         if (
