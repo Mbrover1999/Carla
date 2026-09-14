@@ -323,6 +323,15 @@ def draw_controller_information(
             f" [{stop_sign_information['hold_remaining_s']:.1f} s]"
         )
 
+    if (
+        stop_sign_information is not None
+        and stop_sign_information.get(
+            "waiting_for_cross_traffic",
+            False
+        )
+    ):
+        stop_sign_text += " [WAITING FOR CROSS TRAFFIC]"
+
     lines.append(f"Stop sign: {stop_sign_text}")
 
     if cross_traffic_information is None:
@@ -1183,6 +1192,14 @@ def run_simulation(
                     world_map=world.get_map(),
                     ego_vehicle=ego_vehicle,
                     speed_kmh=speed_kmh,
+                    cross_traffic_blocked=(
+                        cross_traffic_information[
+                            "safety_state"
+                        ] in (
+                            CrossTrafficSafety.WARNING,
+                            CrossTrafficSafety.BRAKING
+                        )
+                    ),
                     active=(
                         SAFETY_ENABLED
                         and STOP_SIGN_DETECTION_ENABLED

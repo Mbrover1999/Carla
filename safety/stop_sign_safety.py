@@ -49,6 +49,7 @@ class StopSignSafety:
         world_map,
         ego_vehicle,
         speed_kmh,
+        cross_traffic_blocked=False,
         active=True
     ):
         if not active:
@@ -102,6 +103,20 @@ class StopSignSafety:
         if self.hold_started_at is not None:
             hold_elapsed = now - self.hold_started_at
             hold_remaining = max(0.0, STOP_SIGN_HOLD_SECONDS - hold_elapsed)
+
+            if hold_remaining <= 0.0 and cross_traffic_blocked:
+                return self.information(
+                    safety_state=self.HOLDING,
+                    sign_id=self.active_sign_id,
+                    distance_m=distance_m,
+                    hold_remaining_s=0.0,
+                    waiting_for_cross_traffic=True,
+                    event_key=(
+                        "stop_sign",
+                        self.active_sign_id,
+                        "WAITING_FOR_CROSS_TRAFFIC"
+                    )
+                )
 
             if hold_remaining <= 0.0:
                 self.released = True
@@ -393,6 +408,23 @@ class StopSignSafety:
             except AttributeError:
                 continue
 
+            try:
+                landmark_waypoint = world_map.get_waypoint(
+                    location,
+                    project_to_road=True
+                )
+            except (AttributeError, RuntimeError):
+                landmark_waypoint = None
+
+            if (
+                landmark_waypoint is None
+                or not self._same_direction(
+                    ego_waypoint,
+                    landmark_waypoint
+                )
+            ):
+                continue
+
             lane_validities = getattr(landmark, "get_lane_validities", None)
 
             if callable(lane_validities):
@@ -519,6 +551,7 @@ class StopSignSafety:
         sign_id=None,
         distance_m=None,
         hold_remaining_s=None,
+        waiting_for_cross_traffic=False,
         event_key=None
     ):
         return {
@@ -526,6 +559,7 @@ class StopSignSafety:
             "sign_id": sign_id,
             "distance_m": distance_m,
             "hold_remaining_s": hold_remaining_s,
+            "waiting_for_cross_traffic": waiting_for_cross_traffic,
             "event_key": event_key
         }
 

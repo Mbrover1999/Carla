@@ -153,28 +153,12 @@ class CarlaInterface:
         shell.pack(fill="both", expand=True)
         tk.Frame(shell, bg=ACCENT, height=4).pack(fill="x")
 
-        navigation = tk.Frame(shell, bg=BACKGROUND)
-        navigation.pack(fill="x", padx=58, pady=(18, 0))
-        self._label(
-            navigation,
-            "CARLA  /  OPEN UNIVERSITY WORKSHOP PROJECT",
-            size=10,
-            color=CYAN,
-            bold=True
-        ).pack(side="left")
-        self._label(
-            navigation,
-            "AUTONOMOUS DRIVING PLATFORM  •  2026",
-            size=9,
-            color=MUTED
-        ).pack(side="right")
-
         page = tk.Frame(shell, bg=BACKGROUND)
         page.pack(
             fill="both",
             expand=True,
             padx=58,
-            pady=(20, 38)
+            pady=(34, 38)
         )
         return page
 
@@ -234,6 +218,79 @@ class CarlaInterface:
                 anchor="w"
             ).pack(fill="x", pady=(6, 0))
 
+    @staticmethod
+    def _welcome_car_illustration(parent):
+        canvas = tk.Canvas(
+            parent,
+            width=560,
+            height=118,
+            bg=PANEL,
+            highlightthickness=0
+        )
+
+        outline = "#3A475B"
+        detail = "#2B384B"
+
+        # Intentionally simple, low-contrast Model 3-inspired side profile.
+        canvas.create_line(
+            55, 78, 83, 67, 140, 60, 190, 32,
+            322, 30, 390, 58, 482, 66, 510, 78,
+            smooth=True,
+            splinesteps=24,
+            fill=outline,
+            width=3
+        )
+        canvas.create_line(
+            55, 78, 67, 88, 145, 91, 415, 91,
+            493, 87, 510, 78,
+            smooth=True,
+            fill=outline,
+            width=3
+        )
+        canvas.create_line(
+            154, 59, 205, 39, 313, 39, 374, 59,
+            fill=detail,
+            width=2,
+            smooth=True
+        )
+        canvas.create_line(
+            260, 39, 260, 88,
+            fill=detail,
+            width=2
+        )
+        canvas.create_line(
+            87, 68, 68, 76, 91, 78,
+            fill=detail,
+            width=2,
+            smooth=True
+        )
+        canvas.create_line(
+            479, 67, 505, 76, 478, 79,
+            fill=detail,
+            width=2,
+            smooth=True
+        )
+
+        for center_x in (151, 423):
+            canvas.create_oval(
+                center_x - 24,
+                70,
+                center_x + 24,
+                112,
+                outline=outline,
+                width=3
+            )
+            canvas.create_oval(
+                center_x - 10,
+                82,
+                center_x + 10,
+                102,
+                outline=detail,
+                width=2
+            )
+
+        return canvas
+
     def show_welcome(self):
         page = self._page()
         content = tk.Frame(
@@ -274,7 +331,9 @@ class CarlaInterface:
             color=MUTED,
             wraplength=900,
             justify="center"
-        ).pack(pady=(15, 28))
+        ).pack(pady=(15, 8))
+
+        self._welcome_car_illustration(content).pack(pady=(0, 14))
 
         capabilities = tk.Frame(content, bg=PANEL)
         capabilities.pack(pady=(0, 32))
