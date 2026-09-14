@@ -42,9 +42,9 @@ DANGER = "#FB7185"
 class CarlaInterface:
     def __init__(self, root):
         self.root = root
-        self.root.title("Autonomous Driving Safety System")
-        self.root.geometry("1360x900")
-        self.root.minsize(1120, 760)
+        self.root.title("Autonomous Driving with a Safety Layer")
+        self.root.geometry("1600x980")
+        self.root.minsize(1280, 820)
         self.root.configure(bg=BACKGROUND)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -157,7 +157,7 @@ class CarlaInterface:
         navigation.pack(fill="x", padx=58, pady=(18, 0))
         self._label(
             navigation,
-            "CARLA  /  SAFETY LAB",
+            "CARLA  /  OPEN UNIVERSITY WORKSHOP PROJECT",
             size=10,
             color=CYAN,
             bold=True
@@ -239,35 +239,40 @@ class CarlaInterface:
         content = tk.Frame(
             page,
             bg=PANEL,
-            padx=64,
-            pady=52,
+            padx=76,
+            pady=58,
             highlightthickness=1,
             highlightbackground="#243653"
         )
-        content.place(relx=0.5, rely=0.46, anchor="center")
+        content.place(
+            relx=0.5,
+            rely=0.47,
+            anchor="center",
+            relwidth=0.84
+        )
 
         tk.Frame(content, bg=CYAN, width=72, height=4).pack(pady=(0, 24))
 
         self._label(
             content,
-            "AUTONOMOUS DRIVING SAFETY SYSTEM",
+            "FINAL WORKSHOP PROJECT  /  CARLA 2026",
             size=11,
             color=CYAN,
             bold=True
         ).pack(pady=(0, 16))
         self._label(
             content,
-            "Drive intelligence.\nBuilt around safety.",
-            size=34,
+            "Autonomous Driving\nwith an Independent Safety Layer",
+            size=38,
             bold=True
         ).pack()
         self._label(
             content,
-            "Explore AI steering, navigation and independent real-time "
-            "safety layers inside CARLA.",
-            size=13,
+            "Created as a final project for a workshop at "
+            "The Open University of Israel.",
+            size=14,
             color=MUTED,
-            wraplength=690,
+            wraplength=900,
             justify="center"
         ).pack(pady=(15, 28))
 
@@ -319,32 +324,137 @@ class CarlaInterface:
 
     def show_about(self):
         page = self._page()
-        self._header(page, "About", back_command=self.show_welcome)
+        self._header(
+            page,
+            "About the project",
+            "A simple overview of the system, its safety features and the "
+            "technologies used to build it.",
+            self.show_welcome
+        )
 
         card = tk.Frame(page, bg=PANEL, padx=34, pady=30)
         card.pack(fill="x")
         self._label(
             card,
-            "Autonomous Driving Safety System",
-            size=19,
+            "Autonomous Driving with an Independent Safety Layer",
+            size=21,
             bold=True,
             anchor="w"
         ).pack(fill="x")
         self._label(
             card,
             (
-                "This project combines an AI steering model with CARLA "
-                "navigation, traffic awareness and independent safety "
-                "layers. The system can detect obstacles, traffic lights, "
-                "cross traffic, blind spots, lane departures and controller "
-                "inactivity."
+                "This system was created as a final project for a workshop "
+                "at The Open University of Israel. It demonstrates a car "
+                "that drives by itself in CARLA while independent safety "
+                "systems continuously check the road and can correct or "
+                "stop the vehicle when necessary."
             ),
             size=12,
             color=MUTED,
             justify="left",
             anchor="w",
-            wraplength=820
+            wraplength=1250
         ).pack(fill="x", pady=(18, 0))
+
+        details = tk.Frame(page, bg=BACKGROUND)
+        details.pack(fill="both", expand=True, pady=(18, 0))
+        details.grid_columnconfigure(0, weight=1, uniform="about")
+        details.grid_columnconfigure(1, weight=1, uniform="about")
+        details.grid_rowconfigure(0, weight=1)
+
+        left = tk.Frame(details, bg=BACKGROUND)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
+        right = tk.Frame(details, bg=BACKGROUND)
+        right.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
+
+        self._about_card(
+            left,
+            "How it works",
+            (
+                "A forward RGB camera supplies images to a PyTorch CNN. "
+                "The model predicts steering on normal road sections. "
+                "CARLA map waypoints guide turns and intersections, and a "
+                "separate controller follows 98% of the road speed limit. "
+                "Before any command reaches the car, the safety layer is "
+                "allowed to reduce throttle, change steering or apply the "
+                "brakes."
+            )
+        ).pack(fill="x")
+
+        self._about_card(
+            left,
+            "Safety features",
+            (
+                "• Speed-based obstacle warning and emergency braking\n"
+                "• Red-light detection and stopping near the stop line\n"
+                "• Lane-departure detection and lane-keeping correction\n"
+                "• Cross-traffic prediction at intersections\n"
+                "• Left and right blind-spot monitoring\n"
+                "• Controller-inactivity warning and automatic Safe Stop\n"
+                "• Hazard lights, repeated wake-up alarm and simulated "
+                "emergency call"
+            )
+        ).pack(fill="x", pady=(18, 0))
+
+        self._about_card(
+            right,
+            "Technologies",
+            (
+                "• CARLA Town10HD with a Tesla Model 3 ego vehicle\n"
+                "• Python\n"
+                "• PyTorch CNN with four convolution layers, trained for "
+                "15 epochs on 320×180 images\n"
+                "• OpenCV with an 800×600 RGB camera, 90° field of view "
+                "and a nominal 20 FPS\n"
+                "• NumPy, pandas and Pillow for data processing\n"
+                "• Tkinter for the desktop interface\n"
+                "• CARLA camera, obstacle, collision, lane and radar sensors\n"
+                "• CSV logging and local WAV audio alerts"
+            )
+        ).pack(fill="x")
+
+        self._about_card(
+            right,
+            "Demonstration and evaluation",
+            (
+                "The interface includes Free Drive and seven controlled "
+                "safety demonstrations: a stationary obstacle, sudden lead-"
+                "vehicle braking, a vehicle cut-in, cross traffic, lane "
+                "departure, a red traffic light and driver inactivity. "
+                "Free Drive produces a safety log and a score with a clear "
+                "explanation of collisions, lane events, speed efficiency "
+                "and journey completion."
+            )
+        ).pack(fill="x", pady=(18, 0))
+
+    def _about_card(self, parent, title, text):
+        card = tk.Frame(
+            parent,
+            bg=PANEL,
+            padx=28,
+            pady=22,
+            highlightthickness=1,
+            highlightbackground="#29405F"
+        )
+        self._label(
+            card,
+            title,
+            size=15,
+            color=CYAN,
+            bold=True,
+            anchor="w"
+        ).pack(fill="x")
+        self._label(
+            card,
+            text,
+            size=10,
+            color=MUTED,
+            justify="left",
+            anchor="nw",
+            wraplength=570
+        ).pack(fill="x", pady=(11, 0))
+        return card
 
     def show_scenarios(self):
         page = self._page()
