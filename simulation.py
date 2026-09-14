@@ -1096,6 +1096,7 @@ def run_simulation(
 
                 cut_in_information = cut_in_safety.inspect(
                     world=world,
+                    world_map=world.get_map(),
                     ego_vehicle=ego_vehicle,
                     active=(
                         SAFETY_ENABLED

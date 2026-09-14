@@ -1,4 +1,5 @@
 import math
+import time
 
 from config import (
     CUT_IN_BRAKE_AMOUNT,
@@ -8,6 +9,7 @@ from config import (
     CUT_IN_EMERGENCY_LONGITUDINAL_METERS,
     CUT_IN_EMERGENCY_TIME_SECONDS,
     CUT_IN_FORWARD_RANGE_METERS,
+    CUT_IN_INTERVENTION_HOLD_SECONDS,
     CUT_IN_MIN_HEADING_ALIGNMENT,
     CUT_IN_MIN_LATERAL_APPROACH_MPS,
     CUT_IN_REAR_RANGE_METERS,
@@ -25,8 +27,14 @@ class CutInSafety:
     EMERGENCY = "CUT_IN_EMERGENCY"
     DISABLED = "DISABLED"
 
-    def inspect(self, world, ego_vehicle, active=True):
+    def __init__(self, clock=None):
+        self.clock = clock or time.monotonic
+        self.latched_information = None
+        self.latched_until = 0.0
+
+    def inspect(self, world, world_map, ego_vehicle, active=True):
         if not active or world is None:
+            self._clear_latch()
             return self.information(safety_state=self.DISABLED)
 
         ego_transform = ego_vehicle.get_transform()
@@ -36,10 +44,20 @@ class CutInSafety:
         right = (-math.sin(yaw), math.cos(yaw))
         ego_velocity = ego_vehicle.get_velocity()
         ego_forward_speed = self._dot_velocity(ego_velocity, forward)
-        ego_lateral_speed = self._dot_velocity(ego_velocity, right)
         ego_half_width, ego_half_length = self._vehicle_extents(
             ego_vehicle
         )
+        try:
+            ego_waypoint = world_map.get_waypoint(
+                ego_location,
+                project_to_road=True
+            )
+        except (AttributeError, RuntimeError):
+            ego_waypoint = None
+
+        if ego_waypoint is None:
+            return self._latched_or_clear()
+
         most_urgent = None
 
         for actor in self._nearby_vehicles(world):
@@ -56,11 +74,12 @@ class CutInSafety:
             try:
                 candidate = self._predict_intrusion(
                     actor=actor,
+                    world_map=world_map,
+                    ego_waypoint=ego_waypoint,
                     ego_location=ego_location,
                     forward=forward,
                     right=right,
                     ego_forward_speed=ego_forward_speed,
-                    ego_lateral_speed=ego_lateral_speed,
                     ego_half_width=ego_half_width,
                     ego_half_length=ego_half_length
                 )
@@ -77,7 +96,7 @@ class CutInSafety:
                 most_urgent = candidate
 
         if most_urgent is None:
-            return self.information()
+            return self._latched_or_clear()
 
         intrusion_time = most_urgent["intrusion_time_s"]
         predicted_longitudinal = abs(
@@ -95,7 +114,7 @@ class CutInSafety:
         else:
             state = self.WARNING
 
-        return self.information(
+        information = self.information(
             safety_state=state,
             actor_id=most_urgent["actor_id"],
             actor_type=most_urgent["actor_type"],
@@ -113,6 +132,16 @@ class CutInSafety:
                 state
             )
         )
+
+        if state in (self.BRAKING, self.EMERGENCY):
+            self.latched_information = information
+            self.latched_until = (
+                self.clock() + CUT_IN_INTERVENTION_HOLD_SECONDS
+            )
+        elif self.clock() < self.latched_until:
+            return dict(self.latched_information)
+
+        return information
 
     def apply(self, requested_control, information):
         state = information["safety_state"]
@@ -144,11 +173,12 @@ class CutInSafety:
     def _predict_intrusion(
         self,
         actor,
+        world_map,
+        ego_waypoint,
         ego_location,
         forward,
         right,
         ego_forward_speed,
-        ego_lateral_speed,
         ego_half_width,
         ego_half_length
     ):
@@ -165,33 +195,58 @@ class CutInSafety:
         ):
             return None
 
+        actor_waypoint = world_map.get_waypoint(
+            actor_location,
+            project_to_road=True
+        )
+
+        if actor_waypoint is None:
+            return None
+
+        ego_road = getattr(ego_waypoint, "road_id", None)
+        actor_road = getattr(actor_waypoint, "road_id", None)
+        ego_lane = getattr(ego_waypoint, "lane_id", 0)
+        actor_lane = getattr(actor_waypoint, "lane_id", 0)
+
+        # Cut-in prediction is only for a neighbouring, same-direction lane
+        # on the same road. Junction conflicts are handled separately by the
+        # cross-traffic safety layer.
+        if (
+            ego_road != actor_road
+            or ego_lane == actor_lane
+            or ego_lane == 0
+            or actor_lane == 0
+            or ego_lane * actor_lane < 0
+        ):
+            return None
+
         actor_velocity = actor.get_velocity()
         actor_forward_speed = self._dot_velocity(actor_velocity, forward)
-        actor_lateral_speed = self._dot_velocity(actor_velocity, right)
-        relative_lateral_speed = actor_lateral_speed - ego_lateral_speed
-        side_sign = math.copysign(1.0, lateral)
-
-        # Positive means that the actor is moving toward the centre line of
-        # the ego vehicle, regardless of whether it comes from left or right.
+        lane_yaw = math.radians(
+            actor_waypoint.transform.rotation.yaw
+        )
+        actor_lane_right = (-math.sin(lane_yaw), math.cos(lane_yaw))
+        actor_lateral_speed = self._dot_velocity(
+            actor_velocity,
+            actor_lane_right
+        )
+        actor_to_ego_x = ego_location.x - actor_location.x
+        actor_to_ego_y = ego_location.y - actor_location.y
+        ego_side_in_actor_lane = (
+            actor_to_ego_x * actor_lane_right[0]
+            + actor_to_ego_y * actor_lane_right[1]
+        )
         lateral_approach_speed = (
-            -side_sign * relative_lateral_speed
-            if abs(lateral) > 0.01
-            else 0.0
-        )
-        actor_lateral_approach_speed = (
-            -side_sign * actor_lateral_speed
-            if abs(lateral) > 0.01
+            math.copysign(1.0, ego_side_in_actor_lane)
+            * actor_lateral_speed
+            if abs(ego_side_in_actor_lane) > 0.01
             else 0.0
         )
 
-        # Relative closing alone is insufficient: it could be caused by the
-        # ego drifting toward a vehicle that is holding its own lane.  Require
-        # the other actor itself to be moving toward the ego lane too.
-        if (
-            lateral_approach_speed < CUT_IN_MIN_LATERAL_APPROACH_MPS
-            or actor_lateral_approach_speed
-            < CUT_IN_MIN_LATERAL_APPROACH_MPS
-        ):
+        # A car following a bend has almost no velocity across its own local
+        # lane. A genuine lane change does, so it is safe to reject anything
+        # below this threshold without widening the forward obstacle sensor.
+        if lateral_approach_speed < CUT_IN_MIN_LATERAL_APPROACH_MPS:
             return None
 
         if self._heading_alignment(actor, forward) < (
@@ -201,7 +256,7 @@ class CutInSafety:
 
         actor_half_width, actor_half_length = self._vehicle_extents(actor)
         lateral_clearance = (
-            abs(lateral)
+            abs(ego_side_in_actor_lane)
             - ego_half_width
             - actor_half_width
             - CUT_IN_CORRIDOR_MARGIN_METERS
@@ -289,6 +344,20 @@ class CutInSafety:
             for actor in actors
             if getattr(actor, "type_id", "").startswith("vehicle.")
         ]
+
+    def _latched_or_clear(self):
+        if (
+            self.latched_information is not None
+            and self.clock() < self.latched_until
+        ):
+            return dict(self.latched_information)
+
+        self._clear_latch()
+        return self.information()
+
+    def _clear_latch(self):
+        self.latched_information = None
+        self.latched_until = 0.0
 
     @classmethod
     def information(
