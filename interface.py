@@ -387,7 +387,9 @@ class CarlaInterface:
             "Safety features",
             (
                 "• Speed-based obstacle warning and emergency braking\n"
+                "• Predictive braking for vehicles cutting into the lane\n"
                 "• Red-light detection and stopping near the stop line\n"
+                "• Map-based stop-sign detection and complete stop\n"
                 "• Lane-departure detection and lane-keeping correction\n"
                 "• Cross-traffic prediction at intersections\n"
                 "• Left and right blind-spot monitoring\n"

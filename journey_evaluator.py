@@ -49,7 +49,8 @@ class JourneyEvaluator:
                 "EMERGENCY",
                 "SAFE_STOP",
                 "RED_",
-                "CREEPING"
+                "CREEPING",
+                "STOP_SIGN"
             )
         )
 

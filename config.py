@@ -138,6 +138,32 @@ BLIND_SPOT_MAX_LATERAL_METERS = 5.5
 
 
 # =========================
+# Cut-in prediction
+# =========================
+
+CUT_IN_DETECTION_ENABLED = True
+
+# Only same-direction vehicles inside this local corridor are considered.
+# A vehicle must also have a real lateral velocity toward the ego lane; this
+# prevents ordinary traffic in the neighbouring lane from causing braking.
+CUT_IN_FORWARD_RANGE_METERS = 25.0
+CUT_IN_REAR_RANGE_METERS = 4.0
+CUT_IN_TIME_HORIZON_SECONDS = 2.5
+CUT_IN_MIN_LATERAL_APPROACH_MPS = 0.25
+CUT_IN_CORRIDOR_MARGIN_METERS = 0.45
+CUT_IN_MIN_HEADING_ALIGNMENT = 0.60
+
+# Intervention thresholds are based on predicted time until the two vehicle
+# envelopes begin to overlap laterally.
+CUT_IN_BRAKE_TIME_SECONDS = 1.8
+CUT_IN_EMERGENCY_TIME_SECONDS = 1.0
+CUT_IN_EMERGENCY_LONGITUDINAL_METERS = 15.0
+CUT_IN_WARNING_THROTTLE = 0.06
+CUT_IN_BRAKE_AMOUNT = 0.65
+CUT_IN_EMERGENCY_BRAKE = 1.0
+
+
+# =========================
 # Safety layer
 # =========================
 
@@ -259,6 +285,29 @@ TRAFFIC_LIGHT_MIN_BRAKING_RANGE_METERS = 4.0
 TRAFFIC_LIGHT_BRAKING_TIME_SECONDS = 0.9
 TRAFFIC_LIGHT_CREEP_MAX_SPEED_KMH = 2.0
 TRAFFIC_LIGHT_CREEP_THROTTLE = 0.05
+
+
+# =========================
+# Stop-sign safety
+# =========================
+
+STOP_SIGN_DETECTION_ENABLED = True
+STOP_SIGN_LANDMARK_TYPE = "206"
+STOP_SIGN_DETECTION_RANGE_METERS = 35.0
+STOP_SIGN_APPROACH_RANGE_METERS = 18.0
+STOP_SIGN_LINE_MARGIN_METERS = 1.0
+STOP_SIGN_STOP_TOLERANCE_METERS = 0.8
+STOP_SIGN_HOLD_SECONDS = 2.0
+STOP_SIGN_HOLD_SPEED_KMH = 1.0
+STOP_SIGN_CREEP_MAX_SPEED_KMH = 2.0
+STOP_SIGN_CREEP_THROTTLE = 0.05
+STOP_SIGN_APPROACH_THROTTLE = 0.14
+STOP_SIGN_MIN_BRAKING_RANGE_METERS = 7.0
+STOP_SIGN_REACTION_TIME_SECONDS = 0.6
+STOP_SIGN_ASSUMED_DECELERATION_MPS2 = 4.5
+STOP_SIGN_BRAKE_AMOUNT = 0.65
+STOP_SIGN_HOLD_BRAKE = 1.0
+STOP_SIGN_RELEASE_CLEARANCE_METERS = 5.0
 
 
 # =========================

@@ -12,6 +12,7 @@ from config import (
     CONTROLLER_INACTIVITY_ENABLED,
     BLIND_SPOT_DETECTION_ENABLED,
     CROSS_TRAFFIC_DETECTION_ENABLED,
+    CUT_IN_DETECTION_ENABLED,
     INTERSECTION_CONTROLLER_ENABLED,
     LANE_INVASION_ENABLED,
     LANE_KEEPING_ENABLED,
@@ -20,6 +21,7 @@ from config import (
     ROAD_SPEED_CONTROL_ENABLED,
     RUN_DURATION_SECONDS,
     SAFETY_ENABLED,
+    STOP_SIGN_DETECTION_ENABLED,
     TRAFFIC_LIGHT_DETECTION_ENABLED
 )
 from journey_evaluator import JourneyEvaluator
@@ -43,10 +45,12 @@ from safety.inactivity_detector import (
 from safety.alert_manager import SafetyAlertManager
 from safety.blind_spot_safety import BlindSpotSafety
 from safety.cross_traffic_safety import CrossTrafficSafety
+from safety.cut_in_safety import CutInSafety
 from safety.emergency_pull_over import EmergencyPullOverController
 from safety.lane_keeping import LaneKeepingAssist
 from safety.safety_layer import SafetyLayer
 from safety.safety_logger import SafetyLogger
+from safety.stop_sign_safety import StopSignSafety
 from safety.traffic_light_safety import TrafficLightSafety
 
 
@@ -124,7 +128,9 @@ def draw_controller_information(
     lane_keeping_enabled=False,
     lane_keeping_information=None,
     traffic_light_information=None,
+    stop_sign_information=None,
     cross_traffic_information=None,
+    cut_in_information=None,
     blind_spot_information=None,
     navigation_information=None,
     intersection_information=None,
@@ -294,6 +300,31 @@ def draw_controller_information(
         f"Traffic light: {traffic_light_text}"
     )
 
+    stop_sign_state = (
+        stop_sign_information["safety_state"]
+        if stop_sign_information is not None
+        else StopSignSafety.DISABLED
+    )
+    stop_sign_text = stop_sign_state
+
+    if (
+        stop_sign_information is not None
+        and stop_sign_information.get("distance_m") is not None
+    ):
+        stop_sign_text += (
+            f" ({stop_sign_information['distance_m']:.1f} m)"
+        )
+
+    if (
+        stop_sign_information is not None
+        and stop_sign_information.get("hold_remaining_s") is not None
+    ):
+        stop_sign_text += (
+            f" [{stop_sign_information['hold_remaining_s']:.1f} s]"
+        )
+
+    lines.append(f"Stop sign: {stop_sign_text}")
+
     if cross_traffic_information is None:
         cross_traffic_state = CrossTrafficSafety.DISABLED
         cross_traffic_distance = None
@@ -320,6 +351,24 @@ def draw_controller_information(
         cross_traffic_text += ")"
 
     lines.append(f"Cross traffic: {cross_traffic_text}")
+
+    cut_in_state = (
+        cut_in_information["safety_state"]
+        if cut_in_information is not None
+        else CutInSafety.DISABLED
+    )
+    cut_in_text = cut_in_state
+
+    if (
+        cut_in_information is not None
+        and cut_in_information.get("intrusion_time_s") is not None
+    ):
+        cut_in_text += (
+            f" ({cut_in_information['side']}, "
+            f"{cut_in_information['intrusion_time_s']:.1f}s)"
+        )
+
+    lines.append(f"Cut-in prediction: {cut_in_text}")
 
     blind_spot_state = (
         blind_spot_information["state"]
@@ -475,7 +524,9 @@ def combine_safety_states(
     lane_invasion_state="CLEAR",
     lane_keeping_state="CLEAR",
     traffic_light_state="CLEAR",
+    stop_sign_state="CLEAR",
     cross_traffic_state="CLEAR",
+    cut_in_state="CLEAR",
     blind_spot_intervention_state="CLEAR"
 ):
     active_states = []
@@ -501,11 +552,24 @@ def combine_safety_states(
     if traffic_light_state != TrafficLightSafety.CLEAR:
         active_states.append(traffic_light_state)
 
+    if stop_sign_state not in (
+        StopSignSafety.CLEAR,
+        StopSignSafety.RELEASED,
+        StopSignSafety.DISABLED
+    ):
+        active_states.append(stop_sign_state)
+
     if cross_traffic_state not in (
         CrossTrafficSafety.CLEAR,
         CrossTrafficSafety.DISABLED
     ):
         active_states.append(cross_traffic_state)
+
+    if cut_in_state not in (
+        CutInSafety.CLEAR,
+        CutInSafety.DISABLED
+    ):
+        active_states.append(cut_in_state)
 
     if blind_spot_intervention_state != "CLEAR":
         active_states.append(blind_spot_intervention_state)
@@ -529,7 +593,9 @@ def get_intervention_reason(
     lane_markings=None,
     lane_keeping_state=None,
     traffic_light_state=None,
+    stop_sign_state=None,
     cross_traffic_state=None,
+    cut_in_state=None,
     blind_spot_intervention_state=None
 ):
     reasons = []
@@ -620,6 +686,23 @@ def get_intervention_reason(
     if traffic_light_state == TrafficLightSafety.RED_BRAKING:
         urgent = True
 
+    stop_sign_reasons = {
+        StopSignSafety.APPROACHING: "Stop sign ahead - slowing down",
+        StopSignSafety.BRAKING: "Stop sign ahead - braking",
+        StopSignSafety.CREEPING: "Stop sign - approaching stop line",
+        StopSignSafety.HOLDING: "Stop sign - complete stop"
+    }
+    stop_sign_reason = stop_sign_reasons.get(stop_sign_state)
+
+    if stop_sign_reason is not None:
+        reasons.append(stop_sign_reason)
+
+    if stop_sign_state in (
+        StopSignSafety.BRAKING,
+        StopSignSafety.HOLDING
+    ):
+        urgent = True
+
     cross_traffic_reasons = {
         CrossTrafficSafety.WARNING: (
             "Cross traffic approaching"
@@ -636,6 +719,21 @@ def get_intervention_reason(
         reasons.append(cross_traffic_reason)
 
     if cross_traffic_state == CrossTrafficSafety.BRAKING:
+        urgent = True
+
+    cut_in_reasons = {
+        CutInSafety.WARNING: "Vehicle merging into lane - slowing down",
+        CutInSafety.BRAKING: "Vehicle cutting in - braking",
+        CutInSafety.EMERGENCY: (
+            "Vehicle cutting in - EMERGENCY BRAKING"
+        )
+    }
+    cut_in_reason = cut_in_reasons.get(cut_in_state)
+
+    if cut_in_reason is not None:
+        reasons.append(cut_in_reason)
+
+    if cut_in_state in (CutInSafety.BRAKING, CutInSafety.EMERGENCY):
         urgent = True
 
     if blind_spot_intervention_state == "BLIND_SPOT_RIGHT_BLOCKED":
@@ -683,7 +781,9 @@ def run_simulation(
         world.get_map()
     )
     traffic_light_safety = TrafficLightSafety()
+    stop_sign_safety = StopSignSafety()
     cross_traffic_safety = CrossTrafficSafety()
+    cut_in_safety = CutInSafety()
     blind_spot_safety = BlindSpotSafety()
     emergency_pull_over = EmergencyPullOverController()
     route_manager = (
@@ -742,8 +842,14 @@ def run_simulation(
         )
     )
     traffic_light_information = TrafficLightSafety.information()
+    stop_sign_information = StopSignSafety.information(
+        safety_state=StopSignSafety.DISABLED
+    )
     cross_traffic_information = CrossTrafficSafety.information(
         safety_state=CrossTrafficSafety.DISABLED
+    )
+    cut_in_information = CutInSafety.information(
+        safety_state=CutInSafety.DISABLED
     )
     blind_spot_information = BlindSpotSafety.information()
     blind_spot_intervention_state = "CLEAR"
@@ -988,6 +1094,15 @@ def run_simulation(
                 else:
                     blind_spot_information = BlindSpotSafety.information()
 
+                cut_in_information = cut_in_safety.inspect(
+                    world=world,
+                    ego_vehicle=ego_vehicle,
+                    active=(
+                        SAFETY_ENABLED
+                        and CUT_IN_DETECTION_ENABLED
+                    )
+                )
+
                 if SAFETY_ENABLED:
                     (
                         final_control,
@@ -1000,6 +1115,11 @@ def run_simulation(
                 else:
                     final_control = requested_control
                     obstacle_safety_state = "DISABLED"
+
+                final_control = cut_in_safety.apply(
+                    requested_control=final_control,
+                    information=cut_in_information
+                )
 
                 cross_traffic_active = (
                     SAFETY_ENABLED
@@ -1057,6 +1177,21 @@ def run_simulation(
                         TrafficLightSafety.information()
                     )
 
+                stop_sign_information = stop_sign_safety.inspect(
+                    world=world,
+                    world_map=world.get_map(),
+                    ego_vehicle=ego_vehicle,
+                    speed_kmh=speed_kmh,
+                    active=(
+                        SAFETY_ENABLED
+                        and STOP_SIGN_DETECTION_ENABLED
+                    )
+                )
+                final_control = stop_sign_safety.apply(
+                    requested_control=final_control,
+                    information=stop_sign_information
+                )
+
                 if (
                     SAFETY_ENABLED
                     and CONTROLLER_INACTIVITY_ENABLED
@@ -1086,12 +1221,24 @@ def run_simulation(
                         "BRAKING",
                         "EMERGENCY"
                     )
+                    and cut_in_information[
+                        "safety_state"
+                    ] not in (
+                        CutInSafety.BRAKING,
+                        CutInSafety.EMERGENCY
+                    )
                     and cross_traffic_information[
                         "safety_state"
                     ] != CrossTrafficSafety.BRAKING
                     and traffic_light_information[
                         "safety_state"
                     ] != TrafficLightSafety.RED_BRAKING
+                    and stop_sign_information[
+                        "safety_state"
+                    ] not in (
+                        StopSignSafety.BRAKING,
+                        StopSignSafety.HOLDING
+                    )
                 )
 
                 if lane_keeping_allowed:
@@ -1184,7 +1331,9 @@ def run_simulation(
                     lane_markings,
                     lane_keeping_information["state"],
                     traffic_light_information["safety_state"],
+                    stop_sign_information["safety_state"],
                     cross_traffic_information["safety_state"],
+                    cut_in_information["safety_state"],
                     blind_spot_intervention_state
                 )
 
@@ -1200,7 +1349,9 @@ def run_simulation(
                 safety_event_key = combine_event_keys(
                     lane_event_key,
                     traffic_light_event_key,
+                    stop_sign_information["event_key"],
                     cross_traffic_information["event_key"],
+                    cut_in_information["event_key"],
                     (
                         blind_spot_information["event_key"]
                         if blind_spot_intervention_state != "CLEAR"
@@ -1242,9 +1393,11 @@ def run_simulation(
                     traffic_light_information[
                         "safety_state"
                     ],
+                    stop_sign_information["safety_state"],
                     cross_traffic_information[
                         "safety_state"
                     ],
+                    cut_in_information["safety_state"],
                     blind_spot_intervention_state
                 )
 
@@ -1339,9 +1492,11 @@ def run_simulation(
                         traffic_light_information=(
                             traffic_light_information
                         ),
+                        stop_sign_information=stop_sign_information,
                         cross_traffic_information=(
                             cross_traffic_information
                         ),
+                        cut_in_information=cut_in_information,
                         blind_spot_information=(
                             blind_spot_information
                         ),
